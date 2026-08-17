@@ -13,6 +13,10 @@ import type {
   ConnectionNegotiationPolicy,
 } from '@dsh-std/connection'
 import { defineCapabilityProtocol } from '@dsh-std/connection'
+import { EXTERNAL_REDIRECT_KIND, externalRedirectClient, externalRedirectProtocol } from './callback.js'
+import type { ExternalRedirectClient } from './callback.js'
+
+export * from './callback.js'
 
 export const API_VERSION = 'presentation.dsh/v1alpha1'
 export const OPEN_EXTERNAL_KIND = 'OpenExternal'
@@ -194,6 +198,7 @@ export interface PresentationClients {
   readonly copyText?: CopyTextClient
   readonly notification?: NotificationClient
   readonly interaction?: UserInteractionClient
+  readonly externalRedirect?: ExternalRedirectClient
 }
 
 export interface OpenExternalHandler {
@@ -251,6 +256,7 @@ export const protocols: readonly ProtocolDefinition[] = Object.freeze([
   copyTextProtocol,
   notificationProtocol,
   userInteractionProtocol,
+  externalRedirectProtocol,
 ])
 
 export function register(catalog: ProtocolCatalog): () => void {
@@ -329,6 +335,7 @@ export function presentationClients(
     ...(has(COPY_TEXT_KIND) ? { copyText: copyTextClient(client, scope) } : {}),
     ...(has(NOTIFICATION_KIND) ? { notification: notificationClient(client, scope) } : {}),
     ...(has(USER_INTERACTION_KIND) ? { interaction: userInteractionClient(client, scope) } : {}),
+    ...(has(EXTERNAL_REDIRECT_KIND) ? { externalRedirect: externalRedirectClient(client, scope) } : {}),
   })
 }
 

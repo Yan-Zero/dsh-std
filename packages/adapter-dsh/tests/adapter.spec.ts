@@ -9,7 +9,12 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { defineProtocolDeclaration } from '@dsh-std/core'
 import { defineComponentManifest } from '@dsh-std/manifest'
-import { StandardEndpointRuntime, resolveConnection } from '@dsh-std/connection'
+import { StandardEndpointRuntime, resolveConnection, type CapabilityClient } from '@dsh-std/connection'
+import {
+  notificationClient,
+  notificationImplementation,
+  notificationSupport,
+} from '@dsh-std/presentation'
 import {
   DSH_ACTIVATION_API_VERSION,
   DSH_ACTIVATION_KIND,
@@ -229,6 +234,67 @@ describe('@dsh-std/adapter-dsh', () => {
       }) }),
     ]))
     for (const dispose of disposers) await dispose()
+  })
+
+  it('gives a standard facet a callable client for its negotiated protocol', async () => {
+    const { adapter } = await fixture(false)
+    const notices: string[] = []
+    let issuedCapability: CapabilityClient | undefined
+    const provider = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.presentation.terminal', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'runtime',
+        activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'terminal' } },
+        protocols: { supports: [notificationSupport] },
+      }] },
+    })
+    await adapter.mount({
+      manifest: provider,
+      facet: 'runtime',
+      activate(activation) {
+        activation.protocols.implement(notificationSupport, notificationImplementation(
+          activation.identity.participantId,
+          {
+            notify(request) {
+              notices.push(request.text)
+              return { status: 'submitted', value: { accepted: true } }
+            },
+          },
+        ))
+      },
+    })
+
+    const consumer = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.presentation.consumer', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'runtime',
+        activation: { apiVersion: DSH_ACTIVATION_API_VERSION, kind: DSH_ACTIVATION_KIND, spec: { module: 'consumer' } },
+        protocols: { requires: [notificationSupport] },
+      }] },
+    })
+    const disposeConsumer = await adapter.mount({
+      manifest: consumer,
+      facet: 'runtime',
+      async activate(activation) {
+        const capability = activation.protocols.client<CapabilityClient>(notificationSupport)
+        if (capability === undefined) throw new Error('Notification client is unavailable')
+        issuedCapability = capability
+        let request = 0
+        const notification = notificationClient(capability, {
+          invocationId: activation.identity.instanceId,
+          origin: activation.identity.participantId,
+          nextRequestId: () => `${activation.identity.instanceId}:${String(++request)}`,
+        })
+        await expect(notification.notify({ text: 'standard notification' })).resolves.toEqual({
+          status: 'submitted', value: { accepted: true },
+        })
+      },
+    })
+    expect(notices).toEqual(['standard notification'])
+    await disposeConsumer()
+    expect(issuedCapability?.binding(notificationSupport)).toBeUndefined()
   })
 
   it('discovers from the profile directory URL supplied by the DSH bundle', async () => {

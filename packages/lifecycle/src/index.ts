@@ -75,12 +75,29 @@ export interface ActivationContext {
   readonly plan: CompositionPlan
   readonly scope: CleanupScope
   readonly protocols: {
-    client(reference: ApiReference): NegotiatedProtocol | undefined
+    agreement(reference: ApiReference): NegotiatedProtocol | undefined
+    client<T = unknown>(reference: ApiReference): T | undefined
     implement<T>(support: ProtocolSupport, implementation: T): () => void
   }
   readonly extensions: {
     publish<T>(reference: ApiReference, name: string, handler: T): () => void
   }
+}
+
+export interface ActivationProtocolAccessRequest {
+  readonly identity: ActivationInstanceIdentity
+  readonly declaration: ProtocolDeclaration
+  readonly agreements: readonly NegotiatedProtocol[]
+}
+
+export interface ActivationProtocolAccessSession {
+  client<T = unknown>(reference: ApiReference): T | undefined
+  close(reason?: string): void | Promise<void>
+}
+
+/** Supplies implementation-neutral scoped protocol clients to one activation. */
+export interface ActivationProtocolAccessBackend {
+  open(request: ActivationProtocolAccessRequest): ActivationProtocolAccessSession | undefined | Promise<ActivationProtocolAccessSession | undefined>
 }
 
 export interface ActivationRequest {
@@ -171,6 +188,7 @@ export class LifecycleCoordinator {
     readonly protocols: ProtocolCatalog,
     readonly drivers: ActivationDriverRegistry,
     readonly publications = new PublicationRegistry(),
+    readonly protocolAccess?: ActivationProtocolAccessBackend,
   ) {}
 
   onStateChange(listener: (record: LifecycleRecord) => void): () => void {
@@ -231,19 +249,31 @@ export class LifecycleCoordinator {
       }
       return preActivation.protocols.find(row => this.protocols.resolve(row) === definition)
     }
-    const context: ActivationContext = Object.freeze({
-      identity, plan, scope,
-      protocols: Object.freeze({
-        client: agreement,
-        implement: <T>(support: ProtocolSupport, implementation: T) => this.stageProtocol(instance, support, implementation),
-      }),
-      extensions: Object.freeze({
-        publish: <T>(reference: ApiReference, name: string, handler: T) => this.stageExtension(instance, reference, name, handler),
-      }),
-    })
-
     let unpublish = (): void => undefined
     try {
+      const protocolSession = await this.protocolAccess?.open(Object.freeze({
+        identity,
+        declaration: plannedDeclaration,
+        agreements: preActivation.protocols,
+      }))
+      if (protocolSession !== undefined) {
+        scope.add(() => protocolSession.close('activation scope closed'))
+      }
+      const protocolClient = <T = unknown>(reference: ApiReference): T | undefined => {
+        if (agreement(reference) === undefined) return undefined
+        return scope.signal.aborted ? undefined : protocolSession?.client<T>(reference)
+      }
+      const context: ActivationContext = Object.freeze({
+        identity, plan, scope,
+        protocols: Object.freeze({
+          agreement,
+          client: protocolClient,
+          implement: <T>(support: ProtocolSupport, implementation: T) => this.stageProtocol(instance, support, implementation),
+        }),
+        extensions: Object.freeze({
+          publish: <T>(reference: ApiReference, name: string, handler: T) => this.stageExtension(instance, reference, name, handler),
+        }),
+      })
       await driver.activate({ selected, activation, context })
       const declaration = defineProtocolDeclaration({
         participant: { id: identity.participantId },

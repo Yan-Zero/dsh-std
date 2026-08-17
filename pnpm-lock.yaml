@@ -41,6 +41,9 @@ importers:
       '@dsh-std/manifest':
         specifier: workspace:*
         version: link:../manifest
+      '@dsh-std/messages':
+        specifier: workspace:*
+        version: link:../messages
       '@dsh-std/model':
         specifier: workspace:*
         version: link:../model
@@ -53,9 +56,15 @@ importers:
       '@dsh-std/session':
         specifier: workspace:*
         version: link:../session
+      '@dsh-std/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@dsh-std/tool':
         specifier: workspace:*
         version: link:../tool
+      '@dsh-std/workspace':
+        specifier: workspace:*
+        version: link:../workspace
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.1
@@ -199,6 +208,21 @@ importers:
       '@dsh-std/manifest':
         specifier: workspace:*
         version: link:../manifest
+
+  packages/workspace:
+    dependencies:
+      '@dsh-std/connection':
+        specifier: workspace:*
+        version: link:../connection
+      '@dsh-std/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dsh-std/manifest':
+        specifier: workspace:*
+        version: link:../manifest
+      '@dsh-std/session':
+        specifier: workspace:*
+        version: link:../session
 
 packages:
 

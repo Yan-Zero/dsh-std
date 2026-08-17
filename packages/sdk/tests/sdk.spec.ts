@@ -12,12 +12,12 @@ describe('@dsh-std/sdk', () => {
       { apiVersion: 'example.dsh/v1alpha1', kind: 'Service' },
       value => (value.agreement as { value: number }).value,
     )
-    expect(protocol({ protocols: { client } } as never, key)).toBe(1)
+    expect(protocol({ protocols: { agreement: client } } as never, key)).toBe(1)
     expect(client).toHaveBeenCalledWith(key)
   })
 
   it('keeps unavailable optional protocols explicit and rejects structural fake keys', () => {
-    const context = { protocols: { client: () => undefined } } as never
+    const context = { protocols: { agreement: () => undefined } } as never
     const key = defineProtocolKey({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, () => 'client')
     expect(optionalProtocol(context, key)).toEqual({ available: false })
     expect(() => protocol(context, { ...key } as never)).toThrow(/not created by defineProtocolKey/)

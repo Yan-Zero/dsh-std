@@ -13,6 +13,7 @@ TypeScript 包按用途提供 subpath：
 ```ts
 import { openExternalProtocol, notificationProtocol } from '@dsh-std/presentation/operations'
 import { userInteractionProtocol } from '@dsh-std/presentation/interaction'
+import { externalRedirectProtocol } from '@dsh-std/presentation/callback'
 ```
 
 协议 identity 为：
@@ -23,6 +24,7 @@ import { userInteractionProtocol } from '@dsh-std/presentation/interaction'
 | `presentation.dsh/v1alpha1` | `CopyText` | 把文本写入用户剪贴板 |
 | `presentation.dsh/v1alpha1` | `Notification` | 显示短暂通知 |
 | `presentation.dsh/v1alpha1` | `UserInteraction` | 问题、审批和秘密输入 |
+| `presentation.dsh/v1alpha1` | `ExternalRedirect` | 在用户端接收一次 HTTP redirect |
 
 这些 kind 可以分别声明、实现、协商和授权。Presentation 不定义页面、面板、scene、route、widget tree 或长期 UI contribution。
 
@@ -141,6 +143,7 @@ interface PresentationClients {
   readonly copyText?: CopyTextClient
   readonly notification?: NotificationClient
   readonly interaction?: UserInteractionClient
+  readonly externalRedirect?: ExternalRedirectClient
 }
 ```
 
@@ -202,6 +205,41 @@ interface NotificationReceipt {
 Notification 是不要求用户响应的短暂消息。它不是持久 event、审计记录或 error transport。调用失败仍通过所属协议返回结构化 error，不能只显示通知后报告成功。
 
 Provider 可以在 invocation 内按 deduplication key 合并尚未显示的重复通知。它不能跨 origin 或 invocation 合并。
+
+## `ExternalRedirect`
+
+`ExternalRedirect` 为 invocation 创建一次性的用户端 HTTP redirect receiver。它用于 OAuth 等必须把浏览器重定向结果送回调用方的流程；consumer 不指定监听地址、端口或路径。
+
+```ts
+interface ExternalRedirectRequest extends PresentationRequestContext {
+  readonly mode: 'http-get'
+}
+
+interface ExternalRedirectReady {
+  readonly type: 'ready'
+  readonly redirectUri: string
+  readonly expiresAt?: string
+}
+
+interface ExternalRedirectValue {
+  readonly query: Readonly<Record<string, readonly string[]>>
+}
+
+interface ExternalRedirectCall {
+  readonly invocationId: string
+  readonly ready: Promise<ExternalRedirectReady>
+  readonly result: Promise<PresentationResult<ExternalRedirectValue>>
+  cancel(reason?: string): void
+}
+```
+
+Provider 必须在 receiver 已经可接受请求后，通过 progress 发送且只发送一个 `ready`。`redirectUri` 必须是指向用户端 loopback interface 的绝对 HTTP URI，并包含 Provider 生成的不可预测一次性路径。Consumer 必须使用该 URI，不得猜测 hostname、port、path 或端口转发形状。
+
+`v1alpha1` 只定义 `http-get`。Provider 接受对 `redirectUri` 的一次 GET 请求，将 query 按参数名和全部值返回。Fragment 不会由浏览器发送，因而不属于结果。请求 body、header、cookie、任意 path 和原始 socket 不向 consumer 暴露。
+
+Provider 在 terminal result、cancel、deadline、invocation 结束、agreement 撤销或 endpoint detach 后立即撤销一次性路径。重复请求必须失败，不能覆盖已经提交的结果。Provider 可以在多个 pending request 之间复用一个 loopback listener，但每个 request 的 path、authority 和生命周期必须隔离。
+
+Provider 返回的完成页面必须由 Provider 固定生成，不执行 consumer 提供的 HTML、JavaScript 或 redirect target。Query value 视为不可信输入；consumer 在将其用于 token exchange 或其他领域操作前仍须执行相应协议校验。
 
 ## `UserInteraction`
 
@@ -365,6 +403,7 @@ Provider 与 Connection Host 不在同一进程时，Provider 通过标准 parti
 - request 已 settled、cancelled 或 expired；
 - presentation authority conflict；
 - field、option、URI、文本或 detail 无效；
+- redirect receiver 未就绪、已经使用或已经撤销；
 - answer 与 request schema 不匹配；
 - permission 或 policy 拒绝；
 - flow control 或并发限制超出；
@@ -381,6 +420,7 @@ Provider 与 Connection Host 不在同一进程时，Provider 通过标准 parti
 - SecretInput 从普通 question、clipboard、Session、diagnostic 和 telemetry 路径隔离。
 - URI、text、label 和 detail 都按大小与 control-character policy 校验。
 - Provider 不执行来自 consumer 的 HTML、JavaScript、ANSI control sequence、shell string 或本地模块。
+- ExternalRedirect 只监听 loopback interface，使用不可预测的一次性 path，并限制 query 大小、参数数量和等待时间。
 - UI 可以隐藏未支持的 kind；不能把 unavailable 自动解释为默认同意。
 - Consumer 与 Provider 都限制并发、队列、deadline 和重复 request。
 
@@ -388,6 +428,7 @@ Provider 与 Connection Host 不在同一进程时，Provider 通过标准 parti
 
 - Core 声明并协商每种 Presentation kind；
 - Connection 承载双向 request/result 和 cancellation；
+- ExternalRedirect 由接近用户的 Presentation provider 接收浏览器回调；Connection Host 只转发已经协商的 progress 和 result；
 - Command 可以在 invocation 中使用 Presentation client，但不拥有 UI；
 - Agent 可以请求 question 或 approval，但 Agent event 只记录不含秘密的结果状态；
 - ContentReference 可以用于将非秘密附件展示给用户，Presentation 不直接访问文件路径；

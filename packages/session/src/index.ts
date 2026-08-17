@@ -3,6 +3,16 @@ import type { ManifestDefinitionCatalog, ManifestExtension } from '@dsh-std/mani
 export const API_VERSION = 'session.dsh/v1alpha1'
 export const EVENT_KIND = 'SessionEvent'
 
+/** Opaque reference to a Session owned by one provider participant. */
+export interface SessionReference { readonly provider: string; readonly id: string }
+
+export function validateSessionReference(value: unknown): SessionReference {
+  if (!record(value)) throw new TypeError('SessionReference must be an object')
+  exact(value, ['provider', 'id'], 'SessionReference')
+  text(value.provider, 'SessionReference.provider'); text(value.id, 'SessionReference.id')
+  return Object.freeze({ provider: value.provider as string, id: value.id as string })
+}
+
 /** Static declaration of one durable event type understood by a component. */
 export interface SessionEventSpec {
   readonly description: string

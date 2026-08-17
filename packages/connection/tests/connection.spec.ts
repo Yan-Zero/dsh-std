@@ -118,9 +118,12 @@ describe('@dsh-std/connection', () => {
     const pair = createMemoryConnectionPair(new MemoryConnectionEndpoint(left.offer), remote, {
       connectionId: 'memory-1', revision: 1, protocols: protocols(),
     })
-    const call = pair.left.client('client/consumer').invoke(service, 'wait', {})
+    const client = pair.left.client('client/consumer')
+    expect(client.binding(service)).toBeDefined()
+    const call = client.invoke(service, 'wait', {})
     pair.close()
     await expect(call.result).rejects.toMatchObject({ code: 'connection-closed' })
+    expect(client.binding(service)).toBeUndefined()
     expect(() => pair.left.client('client/consumer').invoke(service, 'echo', {})).toThrow(ConnectionInvocationError)
   })
 

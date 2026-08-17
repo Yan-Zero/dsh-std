@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-std/presentation",
+  "name": "@dsh-std/workspace",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -7,19 +7,20 @@
   "types": "lib/index.d.ts",
   "exports": {
     ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
-    "./operations": { "types": "./lib/operations.d.ts", "default": "./lib/operations.js" },
-    "./interaction": { "types": "./lib/interaction.d.ts", "default": "./lib/interaction.js" },
-    "./callback": { "types": "./lib/callback.d.ts", "default": "./lib/callback.js" }
+    "./catalog": { "types": "./lib/catalog.d.ts", "default": "./lib/catalog.js" },
+    "./sessions": { "types": "./lib/sessions.d.ts", "default": "./lib/sessions.js" }
   },
   "files": ["lib"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
+    "@dsh-std/connection": "workspace:*",
     "@dsh-std/core": "workspace:*",
-    "@dsh-std/connection": "workspace:*"
+    "@dsh-std/manifest": "workspace:*",
+    "@dsh-std/session": "workspace:*"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

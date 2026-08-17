@@ -16,6 +16,7 @@ import {
   ProtocolCatalog,
   defineProtocolDeclaration,
   sameProtocol,
+  type ApiReference,
   type ProtocolRequirement,
   type ProtocolSupport,
 } from '@dsh-std/core'
@@ -44,8 +45,10 @@ import {
 } from '@dsh-std/lifecycle'
 import {
   StandardEndpointRuntime,
+  type CapabilityClient,
   type CapabilityImplementation,
 } from '@dsh-std/connection'
+import { createMemoryConnectionPair } from '@dsh-std/connection/memory'
 import {
   API_VERSION as COMMAND_API_VERSION,
   KIND as COMMAND_KIND,
@@ -98,10 +101,18 @@ import {
 } from '@dsh-std/session'
 import {
   API_VERSION as PRESENTATION_API_VERSION,
+  presentationClients,
   protocols as presentationProtocols,
   register as registerPresentation,
+  type PresentationClients,
   type PresentationDescriptor,
 } from '@dsh-std/presentation'
+import { register as registerMessages } from '@dsh-std/messages'
+import { register as registerStorage } from '@dsh-std/storage'
+import {
+  register as registerWorkspace,
+  workspaceProviderExtensionDefinition,
+} from '@dsh-std/workspace'
 import type { FacetModule } from '@dsh-std/sdk'
 
 export const name = 'dsh-std-adapter'
@@ -184,6 +195,11 @@ interface MountedFacet {
   readonly disposeProductExtensions: () => void
 }
 
+interface ActiveEntrypoint {
+  readonly publication: DshFacetPublication
+  readonly protocols: ActivationContext['protocols']
+}
+
 interface DshAgentLike {
   readonly id: string
   readonly ctx: { readonly tools: ToolRuntime }
@@ -211,7 +227,7 @@ interface CommandRuntime {
     readonly name: string
     readonly description: string
     readonly input?: { readonly hint: string }
-    readonly handler: (invocation: { readonly rawInput: string; readonly signal: AbortSignal }) =>
+    readonly handler: (invocation: { readonly commandId: string; readonly rawInput: string; readonly signal: AbortSignal }) =>
       CommandExecution['result'] | Promise<CommandExecution['result']>
   }): () => void
 }
@@ -435,7 +451,15 @@ class DshStandardModelAdapter extends LlmAdapter {
 class DshCommandExtensionRegistry {
   constructor(private readonly commands: () => CommandRuntime) {}
 
-  register(resource: CommandResource, candidate: unknown): () => void {
+  register(
+    resource: CommandResource,
+    candidate: unknown,
+    owner: {
+      readonly participantId: string
+      readonly requirements: readonly ProtocolRequirement[]
+      capability(reference: ProtocolRequirement): CapabilityClient | undefined
+    },
+  ): () => void {
     assertCommandHandler(candidate)
     const handler = candidate as CommandHandler
     return this.commands().register({
@@ -443,9 +467,23 @@ class DshCommandExtensionRegistry {
       description: resource.spec.description ?? resource.spec.title,
       input: { hint: 'subcommand' },
       handler: invocation => {
+        const client = owner.requirements.filter(isPresentationProtocol)
+          .map(reference => owner.capability(reference))
+          .find(candidate => candidate !== undefined)
+        const descriptor = client === undefined
+          ? undefined
+          : boundPresentationDescriptor(owner.requirements, client)
+        let requestSequence = 0
+        const presentation: PresentationClients | undefined = descriptor === undefined || client === undefined
+          ? undefined
+          : presentationClients(descriptor, invocationClient(client, invocation.signal), {
+            invocationId: invocation.commandId,
+            origin: owner.participantId,
+            nextRequestId: () => `${invocation.commandId}:${String(++requestSequence)}`,
+          })
         return handler.execute(
           { rawInput: invocation.rawInput },
-          { signal: invocation.signal },
+          { signal: invocation.signal, ...(presentation === undefined ? {} : { presentation }) },
         )
       },
     })
@@ -478,7 +516,7 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly manifests = new Map<string, ComponentManifest>()
   private readonly facets = new Map<string, MountedFacet>()
   private readonly pending = new Map<string, DshFacetPublication>()
-  private readonly activeEntrypoints = new Map<string, DshFacetPublication>()
+  private readonly activeEntrypoints = new Map<string, ActiveEntrypoint>()
   private readonly toolOverrides: DshToolOverrideRegistry
   private readonly sessionEvents = new DshSessionEventRegistry()
   private readonly commandExtensions: DshCommandExtensionRegistry
@@ -489,7 +527,6 @@ export class DshStandardAdapter extends TypertRemoteService {
     this.toolOverrides = new DshToolOverrideRegistry(ctx)
     this.commandExtensions = new DshCommandExtensionRegistry(() => this.commands())
     registerToolComposition(this.compositionRules)
-    this.lifecycle = new LifecycleCoordinator(this.protocols, this.drivers, this.publications)
     const instanceId = randomUUID()
     // A Loader entry's scoped context is anchored at the package that owns the
     // entry. The active profile is therefore passed while the bundle patch is
@@ -518,6 +555,34 @@ export class DshStandardAdapter extends TypertRemoteService {
       }))),
       extensions: Object.freeze([]),
     })
+    this.lifecycle = new LifecycleCoordinator(this.protocols, this.drivers, this.publications, {
+      open: ({ identity, declaration: consumerDeclaration }) => {
+        const consumerEndpoint = new StandardEndpointRuntime({
+          id: `${this.runtime.id}.activation`,
+          instanceId: `${this.runtime.instanceId}:activation:${identity.instanceId}`,
+        })
+        consumerEndpoint.register({ declaration: consumerDeclaration })
+        const pair = createMemoryConnectionPair(consumerEndpoint, this.connectionEndpoint, {
+          connectionId: randomUUID(),
+          revision: 1,
+          protocols: this.protocols,
+        })
+        if (!pair.plan.compatible) {
+          pair.close('activation capability negotiation failed')
+          throw new Error(pair.plan.issues
+            .filter(issue => issue.severity === 'error')
+            .map(issue => issue.message)
+            .join('; '))
+        }
+        const capability = pair.left.client(identity.participantId)
+        return Object.freeze({
+          client<T = unknown>(reference: ApiReference): T | undefined {
+            return capability.binding(reference) === undefined ? undefined : capability as unknown as T
+          },
+          close: (reason?: string) => pair.close(reason),
+        })
+      },
+    })
     this.drivers.register({
       id: DSH_ACTIVATION_DRIVER_ID,
       apiVersion: DSH_ACTIVATION_API_VERSION,
@@ -525,13 +590,18 @@ export class DshStandardAdapter extends TypertRemoteService {
       activate: async ({ selected, context }) => {
         const publication = this.pending.get(facetKey(selected.identity))
         if (publication === undefined) throw new Error(`no entrypoint was supplied for ${facetKey(selected.identity)}`)
-        this.activeEntrypoints.set(context.identity.instanceId, publication)
-        await publication.activate(context)
+        this.activeEntrypoints.set(context.identity.instanceId, Object.freeze({ publication, protocols: context.protocols }))
+        try {
+          await publication.activate(context)
+        } catch (error) {
+          this.activeEntrypoints.delete(context.identity.instanceId)
+          throw error
+        }
       },
       deactivate: async (identity, reason) => {
-        const publication = this.activeEntrypoints.get(identity.instanceId)
+        const active = this.activeEntrypoints.get(identity.instanceId)
         this.activeEntrypoints.delete(identity.instanceId)
-        await publication?.deactivate?.(reason)
+        await active?.publication.deactivate?.(reason)
       },
     })
     ctx.effect(() => async () => {
@@ -747,7 +817,13 @@ export class DshStandardAdapter extends TypertRemoteService {
           const published = publication.extensions.find(row => row.extension === extension
             || (sameProtocol(row.extension, extension) && row.extension.metadata.name === extension.metadata.name))
           if (published !== undefined && record(published.handler) && typeof published.handler.execute === 'function') {
-            disposers.push(this.commandExtensions.register(extension as CommandResource, published.handler))
+            const active = this.activeEntrypoints.get(publication.identity.instanceId)
+            if (active === undefined) throw new Error('command owner activation context is unavailable')
+            disposers.push(this.commandExtensions.register(extension as CommandResource, published.handler, {
+              participantId: publication.identity.participantId,
+              requirements: facet.protocols?.requires ?? [],
+              capability: reference => active.protocols.client<CapabilityClient>(reference),
+            }))
           }
         }
         if (sameProtocol(extension, { apiVersion: MODEL_API_VERSION, kind: MODEL_PROVIDER_KIND })) {
@@ -873,8 +949,11 @@ export class DshStandardAdapter extends TypertRemoteService {
 export function createDshProtocolCatalog(): ProtocolCatalog {
   const catalog = new ProtocolCatalog({ name: '@dsh-std/adapter-dsh', version: '0.1.0' })
   registerCommand(catalog)
+  registerMessages(catalog)
   registerModel(catalog)
   registerPresentation(catalog)
+  registerStorage(catalog)
+  registerWorkspace(catalog)
   return catalog
 }
 
@@ -886,6 +965,7 @@ export function createDshManifestCatalog(): ManifestDefinitionCatalog {
   catalog.registerExtension(toolExtensionDefinition)
   catalog.registerExtension(toolOverrideExtensionDefinition)
   catalog.registerExtension(sessionEventExtensionDefinition)
+  catalog.registerExtension(workspaceProviderExtensionDefinition)
   return catalog
 }
 
@@ -925,6 +1005,53 @@ function ownerOf(mounted: MountedFacet): { component: string; facet: string; par
     component: mounted.manifest.metadata.name,
     facet: mounted.facet.name,
     participantId: mounted.handle.identity.participantId,
+  })
+}
+
+function isPresentationProtocol(reference: ApiReference): reference is ProtocolRequirement {
+  return presentationProtocols.some(definition => sameProtocol(definition, reference))
+}
+
+function boundPresentationDescriptor(
+  requirements: readonly ProtocolRequirement[],
+  client: CapabilityClient,
+): PresentationDescriptor | undefined {
+  const bindings = requirements.filter(isPresentationProtocol)
+    .map(requirement => ({ requirement, binding: client.binding(requirement) }))
+    .filter(row => row.binding !== undefined)
+  const clientId = bindings[0]?.binding?.provider.endpoint.instanceId
+  if (clientId === undefined) return undefined
+  if (bindings.some(row => row.binding?.provider.endpoint.instanceId !== clientId)) {
+    throw new Error('one command invocation cannot span multiple Presentation endpoints')
+  }
+  return Object.freeze({
+    clientId,
+    contracts: Object.freeze(bindings.map(({ requirement }) => Object.freeze({
+      apiVersion: requirement.apiVersion,
+      kind: requirement.kind,
+      ...(requirement.spec === undefined ? {} : { spec: requirement.spec }),
+    }))),
+  })
+}
+
+function invocationClient(client: CapabilityClient, invocationSignal: AbortSignal): CapabilityClient {
+  return Object.freeze({
+    participantId: client.participantId,
+    binding(reference: ApiReference) {
+      return invocationSignal.aborted ? undefined : client.binding(reference)
+    },
+    invoke<TInput = unknown, TOutput = unknown, TProgress = unknown>(
+      reference: ApiReference,
+      operation: string,
+      input: TInput,
+      options?: { readonly signal?: AbortSignal },
+    ) {
+      invocationSignal.throwIfAborted()
+      const signal = options?.signal === undefined
+        ? invocationSignal
+        : AbortSignal.any([invocationSignal, options.signal])
+      return client.invoke<TInput, TOutput, TProgress>(reference, operation, input, { signal })
+    },
   })
 }
 

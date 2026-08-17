@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { ProtocolCatalog, defineProtocolDeclaration } from '@dsh-std/core'
 import {
   API_VERSION,
+  externalRedirectClient,
+  externalRedirectImplementation,
+  externalRedirectSupport,
   openExternalClient,
   openExternalProtocol,
   openExternalSupport,
@@ -13,11 +16,12 @@ import {
   validatePresentationDescriptor,
   validateUserInteractionRequest,
 } from '../src/index.js'
+import type { PresentationResult, UserInteractionHandler, UserInteractionRequest, UserInteractionValue } from '../src/index.js'
 
 describe('@dsh-std/presentation', () => {
   it('registers independently negotiable operation kinds', () => {
     expect(protocols.map(protocol => protocol.kind)).toEqual([
-      'OpenExternal', 'CopyText', 'Notification', 'UserInteraction',
+      'OpenExternal', 'CopyText', 'Notification', 'UserInteraction', 'ExternalRedirect',
     ])
     expect(openExternalProtocol).toMatchObject({ apiVersion: API_VERSION, kind: 'OpenExternal' })
   })
@@ -55,6 +59,29 @@ describe('@dsh-std/presentation', () => {
       expect.objectContaining({ requestId: 'request-1', uri: 'https://example.test/login' }),
       undefined,
     )
+  })
+
+  it('announces an exact loopback redirect URI before returning structured query values', async () => {
+    async function* progress() { yield { type: 'ready' as const, redirectUri: 'http://127.0.0.1:49152/callback/random' } }
+    const invoke = vi.fn(() => ({
+      invocationId: 'redirect-1',
+      result: Promise.resolve({ status: 'submitted' as const, value: { query: { code: ['abc'], scope: ['one', 'two'] } } }),
+      progress: progress(), cancel() {},
+    }))
+    const client = externalRedirectClient({ participantId: 'plugin', binding: () => undefined, invoke } as never, {
+      invocationId: 'command-1', origin: 'example.plugin', nextRequestId: () => 'request-redirect',
+    })
+    const call = client.receive()
+    await expect(call.ready).resolves.toEqual({ type: 'ready', redirectUri: 'http://127.0.0.1:49152/callback/random' })
+    await expect(call.result).resolves.toEqual({ status: 'submitted', value: { query: { code: ['abc'], scope: ['one', 'two'] } } })
+    expect(invoke).toHaveBeenCalledWith(externalRedirectSupport, 'receive', expect.objectContaining({ requestId: 'request-redirect', mode: 'http-get' }), undefined)
+  })
+
+  it('requires ExternalRedirect implementations to announce readiness before submission', async () => {
+    const implementation = externalRedirectImplementation('tui', { receive: async () => ({ status: 'submitted', value: { query: { code: ['abc'] } } }) })
+    await expect(implementation.handle('receive', {
+      requestId: 'request-1', invocationId: 'invocation-1', origin: 'example.plugin', mode: 'http-get',
+    }, { progress() {} } as never)).rejects.toThrow(/before announcing/u)
   })
 
   it('exposes only clients backed by both the descriptor and a live binding', () => {
@@ -105,8 +132,13 @@ describe('@dsh-std/presentation', () => {
       fields: [{ id: 'method', kind: 'select' as const, label: 'Method', options: [{ id: 'browser', label: 'Browser' }] }],
     }
     expect(() => validateUserInteractionRequest(request)).not.toThrow()
+    const interact = vi.fn(async (input: UserInteractionRequest): Promise<PresentationResult<UserInteractionValue>> => {
+      if (input.kind === 'question') return { status: 'submitted', value: { answers: { method: 'browser' } } }
+      if (input.kind === 'approval') return { status: 'submitted', value: { decision: 'approved' } }
+      return { status: 'submitted', value: { secret: 'secret' } }
+    })
     const implementation = userInteractionImplementation('tui', { operations: ['question'] }, {
-      interact: vi.fn(async () => ({ status: 'submitted' as const, value: { answers: { method: 'browser' } } })),
+      interact: interact as UserInteractionHandler['interact'],
     })
     await expect(implementation.handle('interact', request, {} as never)).resolves.toEqual({
       status: 'submitted', value: { answers: { method: 'browser' } },

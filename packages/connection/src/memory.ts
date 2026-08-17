@@ -83,7 +83,7 @@ export interface MemoryConnectionPair {
 }
 
 export function createMemoryConnectionPair(
-  left: MemoryConnectionEndpoint, right: MemoryConnectionEndpoint, options: ResolveConnectionOptions,
+  left: ConnectionEndpoint, right: ConnectionEndpoint, options: ResolveConnectionOptions,
 ): MemoryConnectionPair {
   return new MemoryPair(left, right, options)
 }
@@ -98,8 +98,8 @@ class MemoryPair implements MemoryConnectionPair {
   readonly right: StandardConnection
 
   constructor(
-    private readonly leftEndpoint: MemoryConnectionEndpoint,
-    private readonly rightEndpoint: MemoryConnectionEndpoint,
+    private readonly leftEndpoint: ConnectionEndpoint,
+    private readonly rightEndpoint: ConnectionEndpoint,
     options: ResolveConnectionOptions,
   ) {
     this.currentPlan = resolveConnection(leftEndpoint.offer, rightEndpoint.offer, options)
@@ -124,7 +124,8 @@ class MemoryPair implements MemoryConnectionPair {
     return () => { this.listeners.delete(listener) }
   }
 
-  binding(local: MemoryConnectionEndpoint, participantId: string, reference: ApiReference): CapabilityBinding | undefined {
+  binding(local: ConnectionEndpoint, participantId: string, reference: ApiReference): CapabilityBinding | undefined {
+    if (this.closed) return undefined
     return this.currentPlan.bindings.find(binding =>
       binding.consumer.endpoint.instanceId === local.offer.endpoint.instanceId
       && binding.consumer.participantId === participantId
@@ -132,7 +133,7 @@ class MemoryPair implements MemoryConnectionPair {
   }
 
   invoke<TInput, TOutput, TProgress>(
-    local: MemoryConnectionEndpoint,
+    local: ConnectionEndpoint,
     participantId: string,
     reference: ApiReference,
     operation: string,
@@ -192,13 +193,14 @@ class MemoryPair implements MemoryConnectionPair {
   private assertOpen(): void {
     if (this.closed) throw new ConnectionInvocationError('connection-closed', 'connection is closed')
   }
+
 }
 
 class MemoryConnectionView implements StandardConnection {
   constructor(
     private readonly pair: MemoryPair,
-    private readonly localEndpoint: MemoryConnectionEndpoint,
-    private readonly remoteEndpoint: MemoryConnectionEndpoint,
+    private readonly localEndpoint: ConnectionEndpoint,
+    private readonly remoteEndpoint: ConnectionEndpoint,
   ) {}
 
   get id(): string { return this.pair.plan.connectionId }

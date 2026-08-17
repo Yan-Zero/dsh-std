@@ -12,7 +12,7 @@ TypeScript 包使用 subpath 区分目录与 Session 索引：
 
 ```ts
 import { type WorkspaceReference } from '@dsh-std/workspace'
-import { workspaceCatalogProtocol } from '@dsh-std/workspace/catalog'
+import { workspaceCatalogProtocol, workspaceProviderExtensionDefinition } from '@dsh-std/workspace/catalog'
 import { workspaceSessionsProtocol } from '@dsh-std/workspace/sessions'
 ```
 
@@ -22,6 +22,7 @@ import { workspaceSessionsProtocol } from '@dsh-std/workspace/sessions'
 | --- | --- | --- |
 | `workspace.dsh/v1alpha1` | `WorkspaceCatalog` | Workspace 查询、解析、注册、显示属性、顺序与状态 |
 | `workspace.dsh/v1alpha1` | `WorkspaceSessions` | Workspace 与 Session 的归属及手动顺序 |
+| `workspace.dsh/v1alpha1` | `WorkspaceProvider` | 可由 Host 聚合为 WorkspaceCatalog 的具名 provider resource |
 
 两个 kind 属于同一 npm 包和版本域，可以分别声明、实现、协商与授权。
 
@@ -67,6 +68,10 @@ Workspace 注册记录包含：
 ### Workspace provider
 
 Workspace provider 拥有 Workspace identity、location canonicalization、注册记录和顺序。它发布 `WorkspaceCatalog` support。
+
+可安装组件也可以发布 `WorkspaceProvider` manifest resource，由 Host 聚合为自身的 `WorkspaceCatalog`。其 spec 使用与 Catalog support 相同的 `workspaceDomain`、`operations`、`locatorKinds`、`mutationConcurrency` 和 `limits`，并增加非空显示 `title`。Resource 的运行时 handler 必须实现 spec 声明的 operation；未声明的 operation 不得由调用方推断为可用。
+
+Host 聚合多个 resource 时必须保留 provider identity 与 workspace domain，不得按 title、locator string 或安装顺序合并引用。Resource 不声明菜单、补全、shell、badge 或 UI layout；组件需要公开操作时使用 Command 协议，并以 WorkspaceReference 作为显式输入。
 
 Provider 可以同时实现 `WorkspaceSessions`，也可以把 Session 归属委托给另一 participant。两份 support 只有声明相同 `workspaceDomain` 并在协商时明确绑定后，才能共享 WorkspaceReference。
 
@@ -179,7 +184,7 @@ Catalog 具有单调递增的 `catalogRevision`，每条 Workspace 记录具有�
 
 ## `WorkspaceCatalog`
 
-### Declaration
+### WorkspaceCatalog declaration
 
 ```ts
 type WorkspaceCatalogOperation =
@@ -196,6 +201,7 @@ type WorkspaceCatalogOperation =
 interface WorkspaceCatalogRequirementSpec {
   readonly operations: readonly WorkspaceCatalogOperation[]
   readonly optionalOperations?: readonly WorkspaceCatalogOperation[]
+  readonly workspaceDomain?: string
   readonly locatorKinds?: readonly string[]
   readonly mutationConcurrency?: 'serialized' | 'revision-checked'
 }
@@ -209,7 +215,7 @@ interface WorkspaceCatalogSupportSpec {
 }
 ```
 
-Requirement 中的 `operations` 必须全部得到满足。`locatorKinds` 表示 client 必须能够提交的 locator；Provider 不得仅因理解 unknown locator 的外壳就声明支持该 kind。
+Requirement 中的 `operations` 必须全部得到满足。`workspaceDomain` 存在时只接受相同 domain 的 Provider；省略时仅在其余条件得到唯一 Provider 时完成绑定。`locatorKinds` 表示 client 必须能够提交的 locator；Provider 不得仅因理解 unknown locator 的外壳就声明支持该 kind。
 
 `serialized` 表示 Provider 按接纳顺序串行提交 mutation，但不接受 revision precondition。`revision-checked` 在此基础上提供与 mutation 原子执行的 revision compare-and-swap。Requirement 省略 `mutationConcurrency` 时接受 `serialized`；指定 `revision-checked` 时，协商必须选择相同模式。
 
@@ -323,7 +329,7 @@ Revision precondition 遵循 agreement 的 mutation concurrency；Provider 不�
 
 `list` 和 `get` 可以返回缓存状态或 `unknown`；它们不必为了展示列表而访问每个远端或网络文件系统。
 
-### Watch
+### Catalog watch
 
 `watch` 从一份 Catalog snapshot 开始，随后产生以下变化：
 
@@ -337,7 +343,7 @@ Revision precondition 遵循 agreement 的 mutation concurrency；Provider 不�
 
 ## `WorkspaceSessions`
 
-### Declaration
+### WorkspaceSessions declaration
 
 ```ts
 type WorkspaceSessionsOperation =
@@ -350,6 +356,8 @@ type WorkspaceSessionsOperation =
 interface WorkspaceSessionsRequirementSpec {
   readonly operations: readonly WorkspaceSessionsOperation[]
   readonly optionalOperations?: readonly WorkspaceSessionsOperation[]
+  readonly workspaceDomain?: string
+  readonly sessionDomain?: string
   readonly mutationConcurrency?: 'serialized' | 'revision-checked'
 }
 
@@ -361,7 +369,7 @@ interface WorkspaceSessionsSupportSpec {
 }
 ```
 
-WorkspaceSessions agreement 必须绑定能够产生相应 WorkspaceReference 与 SessionReference 的 domain。相同 id string 不能跨 domain 匹配。
+WorkspaceSessions agreement 必须绑定能够产生相应 WorkspaceReference 与 SessionReference 的 domain。Requirement 可以用 `workspaceDomain`、`sessionDomain` 约束 Provider；省略约束时仅在其余条件得到唯一 Provider 时完成绑定。相同 id string 不能跨 domain 匹配。
 
 ### Membership snapshot
 
@@ -403,7 +411,7 @@ Session reorder 与 Catalog reorder 使用相同的 insert-before 语义，但 r
 
 Session 活动、消息写入和 Agent status 不改变手动顺序。
 
-### Watch
+### Session membership watch
 
 WorkspaceSessions watch 产生完整 membership revision 变化。出现空洞后重新读取该 Workspace 的 membership snapshot。Session 内容变化不产生 WorkspaceSessions event。
 
