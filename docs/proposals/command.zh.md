@@ -92,10 +92,11 @@ Catalog 中不存在对应实际命令 handler 的 descriptor 不会成为可执
 
 - `commandId`；
 - success 或 error result；
-- 可选文本和源事件序号；
-- 本次执行产生的 presentation operation。
+- 可选文本和源事件序号。
 
-执行前，runtime 检查命令所属 activation instance 仍为 active，并检查必需 presentation contract。Handler 不能产生未在所属 facet manifest 中声明的 presentation operation。
+执行前，runtime 检查命令所属 activation instance 仍为 active，并检查必需 presentation contract。需要用户交互的 handler 通过 invocation-scoped `PresentationClient` 直接调用已经协商的 OpenExternal、Notification 或 UserInteraction；handler 不能调用所属 facet 未声明 requirement 的 presentation kind。
+
+Presentation request 与 command invocation 共享 cancellation 和 deadline。Command result 不携带延迟执行的任意 UI operation；interaction 已经 settled 或 cancelled 后，Command 才返回依赖该结果的业务状态。
 
 ### Protocol implementation
 
@@ -134,7 +135,3 @@ Catalog 中不存在对应实际命令 handler 的 descriptor 不会成为可执
 ### Dynamic completion
 
 `v1alpha1` 只有静态 `values`。依赖 context 或远端状态的补全需要新的 operation 或独立 completion capability。
-
-### Presentation delivery
-
-当前 operation 随 `CommandExecution` 返回。Connection 支持稳定的反向调用后，presentation 是继续作为结果数据，还是改为调用对应 capability，需要单独确定。

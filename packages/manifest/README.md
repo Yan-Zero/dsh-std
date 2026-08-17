@@ -1,5 +1,5 @@
 # @dsh-std/manifest
 
-Static `dsh-plugin.json` object model, JSON Schema, and validator for the community plugin draft. `parseManifest()` neither executes plugin code nor fetches schemas from the network. `projectManifest()` produces only a temporary Host-internal Composition/Lifecycle projection.
+Static Community v0.15 `dsh-plugin.json` object model, JSON Schema, validator, and Host-internal projection. `manifestVersion` selects the built-in parser. `parseManifest()` checks that `$schema` is an absolute URI but neither pins it to a nonexistent canonical URL nor fetches it from the network.
 
-The current canonical identifier is an experimental dsh-std-owned URN; it does not claim that community#24 has frozen its final schema.
+The package exports its local draft schema as `@dsh-std/manifest/schema/dsh-plugin-0.15.schema.json`. This is a packaged validation asset, not a claim that community#24 has assigned a canonical schema URI.

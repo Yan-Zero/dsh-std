@@ -6,7 +6,7 @@ DeepSeek Harness 的产品适配层。设计见 [DeepSeek Harness Adapter](../..
 
 `DshStandardAdapter` 持有协议 definition catalog、manifest definition catalog、activation drivers、lifecycle coordinator 和 connection endpoint。它不是全局插件注册表。
 
-这个包自身是 DSH profile bundle；安装后由 `cordis.patch.yml` 激活。adapter 会读取当前 profile 的普通 dependencies，发现并校验其中的 `dsh-plugin.json`，检查 Host API 与 required capabilities，再装载 `entrypoints.host`。标准插件本身不需要声明 `dsh.bundle`，也不需要引用这个 adapter。
+这个包自身是 DSH profile bundle；安装后由 `cordis.patch.yml` 激活。adapter 会读取当前 profile 的普通 dependencies，发现并校验其中的 Community v0.15 `dsh-plugin.json`，协商 `requires.contracts`，再装载 `facets.host.entry`。标准插件本身不需要声明 `dsh.bundle`，也不需要引用这个 adapter。
 
 ```sh
 dsh plugin --profile web add @dsh-std/adapter-dsh

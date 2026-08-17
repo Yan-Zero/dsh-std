@@ -36,7 +36,8 @@ Provenance 是可观察性与归责数据，不负责激活、授权或回滚本
 
 ImpactReport 至少包含：
 
-- component manifest identity、source 与 digest；
+- component manifest identity、schema identifier、`manifestVersion`、source 与原始内容 digest；
+- Manifest projection digest，以及规范化项目到原始 JSON path 的关联；
 - 将添加、更新或移除的 packages/components；
 - protocol requirements 与潜在 supports；
 - facets、activations 和 static extensions；
@@ -44,6 +45,8 @@ ImpactReport 至少包含：
 - adapter 声明的非标准影响；
 - composition conflicts、warnings 与 policy decisions；
 - validator/evaluator identity 和输入 digest。
+
+Host 支持多个 Manifest 版本时，记录必须保留产生 projection 的版本规则。两个版本投影出等价组件声明时，可以共享后续 composition 结果，但不能丢弃各自的原始 Manifest 与校验证据。
 
 Impact report 在执行安装或 activation 之前生成。动态代码仍可能尝试未声明行为，因此报告不是 sandbox 保证。
 

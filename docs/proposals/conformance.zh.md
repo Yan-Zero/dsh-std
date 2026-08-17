@@ -35,6 +35,7 @@ Manifest schema 校验只能发现字段错误，无法证明协商算法、状�
 协议可以提供以下测试层：
 
 - `schema`：合法/非法对象 fixtures；
+- `manifest-projection`：Manifest 版本输入与预期 component/facet/protocol projection；
 - `negotiation`：声明、policy 与预期 agreement/issue；
 - `state-machine`：输入序列与预期状态变化；
 - `wire`：canonical encoding、frame 与错误处理；
@@ -42,6 +43,19 @@ Manifest schema 校验只能发现字段错误，无法证明协商算法、状�
 - `adapter`：产品内部对象与标准对象的双向映射。
 
 并非所有协议都需要全部层。Suite 明确自己覆盖的层和 participant role。
+
+Manifest projection suite 必须分别验证每个受支持的 Manifest 版本。至少覆盖：
+
+- `$schema` 与 `manifestVersion` 不一致；
+- required/optional protocol references；
+- 未知协议 definition；
+- namespaced extension 的保留、忽略和拒绝；
+- Host facet entry 的包内路径约束；
+- permission、subscription 和 contribution 投影；
+- 原始 JSON path 与 projection item 的关联；
+- 解析与投影期间没有执行插件入口或访问网络。
+
+两个 Manifest 版本若声明等价的 component、facet 和 protocol 语义，其 canonical projection vector 必须等价。该等价只证明共同语义一致，不把一个版本未表达的字段补入结果。
 
 ### Report
 
@@ -59,9 +73,19 @@ Manifest schema 校验只能发现字段错误，无法证明协商算法、状�
 
 `skip` 不能计入通过率。实现只声称某个 optional role 或 feature 时，suite 才把对应 case 纳入适用集合。
 
+### Manifest compatibility claim
+
+Manifest 兼容声明必须列出 schema identifier、`manifestVersion`、projection suite digest 和实现实际理解的协议集合。声明“支持 Community v0.15 Manifest”表示实现能够解析该版本的全部基础结构，并对合法输入产生规定的 component/facet projection；它不表示实现了 Manifest 中可能引用的所有领域协议。
+
+当插件引用实现未知的协议时，Manifest compatibility claim 仍然有效，但校验或 composition 必须按 required/optional 规则产生相应结果。实现不能为了维持“兼容”标签而删除未知 required requirement，也不能把未理解的 extension 展示为可用能力。
+
+支持 Community v0.15 的产品必须能够以其公开 fixtures 作为输入运行 projection 和 preflight。产品可以额外理解 namespaced extensions；这类支持在 claim 中按协议坐标或 extension definition 单独列出，不扩大 Community v0.15 基础声明的含义。
+
 ### Deterministic vectors
 
 Core、composition 与 connection 等确定性算法发布纯数据 vectors。任何语言实现都可以读取相同输入，并比较 canonical output 或 digest。
+
+Manifest version definitions 同样发布纯数据 projection vectors。Runner 不能以某个 TypeScript parser 的对象布局替代规范化结果。
 
 Test vector 不依赖 npm module 执行。Reference implementation 可以帮助生成和调试，但不是规范结果的唯一权威来源。
 

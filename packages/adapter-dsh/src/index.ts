@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
@@ -16,7 +16,6 @@ import z from '@deepseek-ai/schemastery'
 import {
   ProtocolCatalog,
   defineProtocolDeclaration,
-  satisfiesVersionRange,
   sameProtocol,
   type ProtocolRequirement,
   type ProtocolSupport,
@@ -56,6 +55,7 @@ import {
   assertCommandHandler,
   extensionDefinition as commandExtensionDefinition,
   register as registerCommand,
+  resourceSupport as commandResourceSupport,
   runtimeSupport as commandRuntimeSupport,
   type CommandCatalog,
   type CommandDescriptor,
@@ -121,10 +121,6 @@ export const DSH_MODEL_CATALOG_KIND = MODEL_CATALOG_KIND
 export const DSH_TOOL_API_VERSION = TOOL_API_VERSION
 export const DSH_SESSION_API_VERSION = SESSION_API_VERSION
 export const DSH_PRESENTATION_API_VERSION = PRESENTATION_API_VERSION
-export const DSH_HOST_API_VERSION = '0.1.0'
-
-const DSH_HOST_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({ commands: '0.1.0' })
-
 const ADAPTER_COMPONENT = 'std.dsh.adapter-dsh'
 const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
 
@@ -527,7 +523,7 @@ export class DshStandardAdapter extends TypertRemoteService {
     const profile = config.profile?.trim() || profileFromBaseUrl(profileBaseUrl)
     const declaration = defineProtocolDeclaration({
       participant: { id: ADAPTER_PARTICIPANT },
-      supports: [commandRuntimeSupport, modelCatalogSupport],
+      supports: [commandResourceSupport, commandRuntimeSupport, modelCatalogSupport],
     })
     this.runtime = Object.freeze({
       id: config.runtimeId?.trim() || 'dsh', instanceId,
@@ -593,7 +589,7 @@ export class DshStandardAdapter extends TypertRemoteService {
           if (facet.activation?.apiVersion !== FACET_MODULE_API_VERSION
             || facet.activation.kind !== FACET_MODULE_KIND) continue
           const spec = facetModuleActivationDefinition.validateSpec(facet.activation.spec)
-          const resolved = createRequire(manifestPath).resolve(spec.module)
+          const resolved = resolveFacetModule(packageDir, spec.module)
           const namespace = await import(pathToFileURL(resolved).href) as Record<string, unknown>
           const module = namespace.default ?? namespace.facet
           assertFacetModule(module, spec.module)
@@ -1041,16 +1037,18 @@ function assertFacetModule(value: unknown, module: string): asserts value is Fac
 }
 
 function assertHostCompatibility(manifest: PluginManifest): void {
-  if (!satisfiesVersionRange(DSH_HOST_API_VERSION, manifest.apiVersion)) {
-    throw new Error(`plugin ${JSON.stringify(manifest.id)} requires Host API ${manifest.apiVersion}; adapter provides ${DSH_HOST_API_VERSION}`)
+  if (manifest.facets.host.apiVersion !== 'v1alpha1') {
+    throw new Error(`plugin ${JSON.stringify(manifest.id)} requires Host facet API ${manifest.facets.host.apiVersion}; adapter provides v1alpha1`)
   }
-  for (const [id, range] of Object.entries(manifest.capabilities?.required ?? {})) {
-    const provided = DSH_HOST_CAPABILITIES[id]
-    if (provided === undefined) throw new Error(`plugin ${JSON.stringify(manifest.id)} requires unavailable capability ${JSON.stringify(id)}`)
-    if (!satisfiesVersionRange(provided, range)) {
-      throw new Error(`plugin ${JSON.stringify(manifest.id)} requires capability ${id} ${range}; adapter provides ${provided}`)
-    }
+}
+
+function resolveFacetModule(packageDir: string, module: string): string {
+  const resolved = resolvePath(packageDir, module)
+  const inside = relative(packageDir, resolved)
+  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw new TypeError(`FacetModule ${JSON.stringify(module)} must resolve to a file inside the plugin package`)
   }
+  return resolved
 }
 
 function record(value: unknown): value is Record<string, unknown> {

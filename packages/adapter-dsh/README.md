@@ -6,7 +6,7 @@ The DeepSeek Harness product adapter described by the [adapter proposal](../../d
 
 `DshStandardAdapter` owns protocol and manifest definition catalogs, activation drivers, a lifecycle coordinator, and a connection endpoint. It is not a global plugin registry.
 
-This package is itself a DSH profile bundle and is activated by its `cordis.patch.yml`. It scans the active profile's ordinary dependencies for `dsh-plugin.json`, checks the Host API and required capabilities, and loads `entrypoints.host`. Standard plugins neither declare `dsh.bundle` nor import this adapter.
+This package is itself a DSH profile bundle and is activated by its `cordis.patch.yml`. It scans the active profile's ordinary dependencies for Community v0.15 `dsh-plugin.json`, negotiates `requires.contracts`, and loads `facets.host.entry`. Standard plugins neither declare `dsh.bundle` nor import this adapter.
 
 ```sh
 dsh plugin --profile web add @dsh-std/adapter-dsh

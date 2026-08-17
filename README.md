@@ -28,3 +28,7 @@ Node.js `^22.19 || >=24` and pnpm are required.
 pnpm install
 pnpm check
 ```
+
+## License
+
+[MIT](LICENSE)

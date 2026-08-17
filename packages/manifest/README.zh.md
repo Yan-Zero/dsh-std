@@ -1,5 +1,5 @@
 # @dsh-std/manifest
 
-社区插件草案的静态 `dsh-plugin.json` 对象模型、JSON Schema 与校验器。`parseManifest()` 不执行插件代码或联网取 schema；`projectManifest()` 只为当前 Host 内部的 Composition/Lifecycle 生成临时投影。
+Community v0.15 `dsh-plugin.json` 的静态对象模型、JSON Schema、校验器和 Host 内部投影。内置解析器由 `manifestVersion` 选择；`parseManifest()` 只要求 `$schema` 是绝对 URI，不把它绑定到不存在的 canonical URL，也不联网获取 schema。
 
-当前 canonical identifier 是 dsh-std 自有的实验 URN，不代表 community#24 已经冻结正式 schema。
+本包通过 `@dsh-std/manifest/schema/dsh-plugin-0.15.schema.json` 导出本地草案 schema。它是随包发布的校验资源，不表示 community#24 已经指定 canonical schema URI。

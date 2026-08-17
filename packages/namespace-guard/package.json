@@ -16,7 +16,7 @@
     "README.md"
   ],
   "sideEffects": false,
-  "license": "Apache-2.0",
+  "license": "MIT",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

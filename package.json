@@ -1,6 +1,7 @@
 {
   "name": "dsh-std-workspace",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@11.21.0",
   "scripts": {
     "build": "pnpm -r build",

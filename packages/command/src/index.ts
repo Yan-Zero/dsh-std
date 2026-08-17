@@ -1,5 +1,7 @@
 import type {
   ProtocolCatalog,
+  ProtocolDefinition,
+  ProtocolIssue,
   ProtocolSupport,
 } from '@dsh-std/core'
 import type { ManifestDefinitionCatalog, ManifestExtension } from '@dsh-std/manifest'
@@ -163,6 +165,35 @@ export const extensionDefinition = Object.freeze({
   },
 })
 
+/** Host support for accepting and owning Command resource publications. */
+export const resourceProtocol: ProtocolDefinition = Object.freeze({
+  apiVersion: API_VERSION,
+  kind: KIND,
+  validateRequirement: emptyProtocolSpec,
+  validateSupport: emptyProtocolSpec,
+  negotiate(input) {
+    const issues: ProtocolIssue[] = []
+    for (const row of input.requirements) {
+      if (input.supports.some(candidate => candidate.participant !== row.participant)) continue
+      issues.push(Object.freeze({
+        code: row.requirement.optional === true ? 'optional-support-missing' : 'required-support-missing',
+        severity: row.requirement.optional === true ? 'warning' : 'error',
+        participant: row.participant,
+        message: `no participant accepts ${row.requirement.apiVersion} ${row.requirement.kind} resources`,
+      }))
+    }
+    return {
+      agreement: Object.freeze({ kind: 'ResourcePublication' as const }),
+      issues: Object.freeze(issues),
+    }
+  },
+} satisfies ProtocolDefinition)
+
+export const resourceSupport: ProtocolSupport = Object.freeze({
+  apiVersion: API_VERSION,
+  kind: KIND,
+})
+
 /** Callable, resource-keyed command dispatcher implemented once by a Runtime adapter. */
 export const runtimeProtocol = defineCapabilityProtocol({
   apiVersion: API_VERSION,
@@ -204,11 +235,18 @@ export function commandRuntimeImplementation(
 
 export function register(protocols: ProtocolCatalog, manifest?: ManifestDefinitionCatalog): () => void {
   const disposeResource = manifest?.registerExtension(extensionDefinition) ?? (() => undefined)
+  const disposeResourceProtocol = protocols.register(resourceProtocol)
   const disposeRuntime = protocols.register(runtimeProtocol)
   return () => {
     disposeRuntime()
+    disposeResourceProtocol()
     disposeResource()
   }
+}
+
+function emptyProtocolSpec(value: unknown): undefined {
+  if (value !== undefined) throw new TypeError('Command resource protocol does not accept spec')
+  return undefined
 }
 
 function record(value: unknown): value is Record<string, unknown> {

@@ -18,7 +18,7 @@ Cordis、Typert、DSH Agent 与具体 UI 类型只出现在 adapter 内部。
 
 DSH adapter 提供共同的产品边界：
 
-- 读取 `@dsh-std/manifest` 的 `dsh-plugin.json`，并装载 Host entrypoint；
+- 读取受支持版本的 `dsh-plugin.json`，并把 Host facet 投影到 DSH activation；
 - 把 Cordis activation/disposal 映射到标准 lifecycle；
 - 为标准 protocol support、event subscription、permission grant 和 contribution 建立 owner；
 - 按需把 DSH 内部服务映射为 command、tool、model、presentation 或 connection 实现；
@@ -44,9 +44,26 @@ Adapter 不存在时，DSH 按原有方式工作。其他插件不能假定标�
 
 Manifest 不能自行令宿主发现并执行 adapter。DSH 必须通过已有的正式插件安装或 profile 组合机制挂载基础 adapter；这是一次产品 bootstrap，不是每个标准 component 各自 patch DSH。
 
-基础 adapter 激活后向 DSH loader 注册它实现的 activation definitions、drivers 和 SDK backend。此后安装器发现 `dsh-plugin.json`，先检查 Host API 与 required capabilities，再把 `entrypoints.host` 投影到内部 activation。插件不需要知道 `dsh-host`、TUI、Web 或 adapter 的内部 service 名称。
+基础 adapter 激活后向 DSH loader 注册它实现的 activation definitions、drivers 和 SDK backend。此后安装器发现 `dsh-plugin.json`，按 `$schema` 与 `manifestVersion` 校验受支持的 Manifest 版本，再把其中的 Host facet 投影到内部 activation。插件不需要知道 `dsh-host`、TUI、Web 或 adapter 的内部 service 名称。
 
 若 DSH 尚未提供 component manifest discovery，过渡安装器可以生成普通 profile/plugin 配置以挂载已识别的 component，但不能修改 component 代码或把未选 facets 合并成一个入口。DSH 获得正式 discovery API 后应替换该过渡层，而不改变 manifest 或领域协议。
+
+### Manifest mapping
+
+Adapter 对 Manifest 的处理止于产品映射，不改变 Manifest 或领域协议语义。它必须保留原始文件 digest、Manifest version、projection digest 和字段路径。
+
+对于 Community v0.15 Manifest：
+
+- `facets.host.entry` 解析为包内模块，并由 `facets.host.apiVersion` 选择兼容的 Host activation driver；
+- `requires.contracts` 形成该 facet 的 protocol requirements；
+- command contributions 形成没有子节点的标准 `Command` extensions；
+- permissions 与 subscriptions 先由其各自 definition 解析，再进入 permission/event adapter；
+- source、artifact、compat 和 override 信息只进入 admission/provenance；
+- Manifest 未声明 potential supports 时，Adapter 不从模块导出或 Cordis service 猜测静态 supports。
+
+协议坐标不在 Adapter 的内建协议集合中，不足以判定 Manifest 非法。只要当前 Host 安装了相应 definition 和产品 mapping，它可以参与 composition；definition 缺失时按 requirement 的 required/optional 语义报告。Adapter 不把组织命名空间改写成 DSH 私有 service name。
+
+Namespaced Manifest extension 若没有对应 definition，可以按 Manifest 版本规定保留或忽略，但不能注册 handler、申请隐含权限或形成 live support。
 
 ### Protocol adapters
 
@@ -55,6 +72,10 @@ Manifest 不能自行令宿主发现并执行 adapter。DSH 必须通过已有�
 - command adapter 把 DSH 命令目录与执行入口映射为 command protocol；
 - tool adapter 从 Agent/ToolRuntime 生成 tool discovery，并按当前 policy 投影 schema；
 - model adapter 把已安装 provider 和动态状态映射为 model catalog；
+- agent adapter 把 Agent registry、状态和控制入口映射为 AgentControl/AgentConfiguration；
+- session adapter 把 Session persistence、event history 与 fork 映射为 SessionCatalog/SessionHistory；
+- workspace adapter 把 WorkspaceRegistry 与 Workspace entity 映射为 WorkspaceCatalog/WorkspaceSessions；
+- content adapter 把 DSH 可持久化的附件存储映射为 ContentStore；
 - presentation adapter 把 invocation-scoped operation 交给 TUI、Web 或其他 presentation participant；
 - connection adapter 为 DSH profile 创建 endpoint view、connector 或 acceptor。
 
@@ -93,7 +114,7 @@ DSH loader 校验路径和 schema 后，按 composition plan 激活所属 facet�
 
 一个带 DSH activation 的 facet 按以下顺序激活：
 
-1. 静态读取并校验 manifest；
+1. 静态读取 Manifest，校验其版本并投影为 component/facet 声明；
 2. 由 composition 选择 facets，并计算协议、component relationship、extension 和 permission 的候选 plan；
 3. 为 selected facet 创建 activation instance、scope 与受限 SDK facade；
 4. 由 activation kind handler 加载经过验证的 Cordis module；
@@ -150,21 +171,56 @@ Model adapter 将 `ModelProviderHandler` 映射到 DSH 的 LLM registry。它把
 
 ### Session mapping
 
-Session adapter 将 selected facets 的 `SessionEvent` resources 映射到 DSH 会话事件 vocabulary。DSH 的内建事件集合构成基线，组件 contribution 按 activation instance 记录 owner；停用组件不会删除基线事件或其他 owner 的注册。
+Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。Catalog list/get 只返回当前 scope 可见的 descriptor；History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset。
+
+DSH 提供的 create、rename、delete 或 fork 操作只有在其公开领域 API 可以保持对应原子性与 lifecycle 语义时才进入 support spec。缺少某项产品操作不会阻止 adapter 发布只读 Catalog/History；adapter 不能绕过 Session invariant 伪造该 operation。
+
+Session adapter 还将 selected facets 的 `SessionEvent` resources 映射到 DSH 会话事件 vocabulary。DSH 的内建事件集合构成基线，组件 contribution 按 activation instance 记录 owner；停用组件不会删除基线事件或其他 owner 的注册。
 
 事件写入仍使用 DSH Session API。Adapter 根据 `replay` 检查持久 envelope 是否具备相应的未知事件处理语义；不能保存 ignorable 标记的产品版本不声明完整支持该类写入。
+
+### Agent mapping
+
+Agent adapter 以 DSH Agent registry 和 Agent handle 为活动实体权威来源。它映射 list/create/attach/inspect、turn submit/steer/cancel、status event 和 disposal，并为每个标准 attachment 维护 controller lease；TUI 的 Channel、React/Ink state 和产品事件 class 不进入标准 payload。
+
+Agent 关联的 DSH Session 与 cwd 分别转换为 SessionReference 和 WorkspaceReference。转换失败时省略相应可选关联或拒绝要求该关联的操作，不能把裸 session id、cwd 或 Agent object 填入标准 reference。
+
+AgentConfiguration descriptor 从当前 Agent runtime 实际支持的配置生成。Model、effort、preset、sandbox 等产品字段只有在具备标准 key 语义或明确的实现 namespace 时才公开；adapter 不把所有配置对象原样透传。
+
+### Workspace mapping
+
+Workspace adapter 以 DSH `WorkspaceRegistry` 和 `Workspace` entity 为权威来源：
+
+- registry list/get/resolveByPath 映射 Catalog list/get/resolve；
+- registry create/delete/insertBefore 映射 register/unregister/reorder；
+- entity setTitle/status 映射 rename/status；
+- entity sessionIds、attachSession、detachSession、insertSessionBefore 映射 WorkspaceSessions。
+
+DSH path 先由 WorkspaceRegistry 自身 canonicalize 和验证。Adapter 不自行重写 symlink、大小写或 membership invariant，也不把 directory picker、`ctx.fs` 或 shell executor 并入 WorkspaceCatalog。
+
+Workspace mutation 的公开 DSH API只保证串行提交时，support 声明 `mutationConcurrency: 'serialized'`。Adapter 不能在临界区外比较 timestamp 后声称实现了 `revision-checked`。
+
+DSH workspace domain 中保存 Session archive 状态属于产品存储选择。它不进入 WorkspaceSessions；需要远端公开时，由 DSH namespaced Session visibility protocol 或产品 UI policy 表达，不能因此扩张基础 SessionCatalog。
+
+### Content mapping
+
+Content adapter 只在 DSH 存在能够保证 stable reference、有界 transfer、authorization 和 retention 的附件存储时发布 ContentStore。Prompt 中的临时本地图片路径、Buffer object、模型 provider 私有 image handle 或任意 URL 都不能直接充当 ContentReference。
+
+导入本地文件时，拥有相应 DSH filesystem permission 的调用方读取字节，再通过 ContentStore put；Content adapter 本身不获得任意 filesystem root。Session adapter 在持久 event 引用 content 前取得 Session retention lease。
 
 ### Presentation mapping
 
 Presentation support 由当前用户侧 participant 发布，可以来自 TUI、Web、GUI 或其他客户端。DSH runtime 只在 invocation agreement 与 permission grant 覆盖的范围内取得 scoped presentation API。
 
+Question、approval 和 secret input 映射到当前 DSH UI 已有的交互 store 时，adapter 保留 request identity、单一 authority、cancel 与 deadline。多个 UI 同时存在时由 connection/composition policy 选择，不能把同一 approval 广播后接受最快响应。
+
 Device code、secret input、approval token 和其他短期值只存在于 invocation scope。Adapter 不把它们写入普通 session history 或可重放 event stream。
 
 ### Connection mapping
 
-Connection adapter 可以实现 connector、acceptor 或二者。它从 DSH composition service 取得 live declarations，但只向 `@dsh-std/connection` 提交已经裁剪的 `EndpointConnectionView`。
+Connection adapter 把 DSH 的 composition、permission 和 activation scope 接入 Connection Host。标准 facet 通过 ParticipantPublicationService 发布 live declarations 和 implementation endpoint；传统 DSH 内建服务由 adapter 作为有 owner 的 participant publication 投影。只有当前 consumer scope 和已认证 peer 可见的声明进入 `EndpointConnectionView`。
 
-Host、Remote SSH、TUI 或 Web 不需要导入 adapter 的内部 registry。它们声明并实现 connection 标准接口；adapter 负责把 attachment 交给当前 DSH profile 中相应协议的 participant。
+Connection Host implementation 提供 Connection Service、Participant Publication Service、provider registry、wire 和 acceptor。TUI、Web 与业务插件只要求标准 service；SSH 集成通过 Host provider SPI 贡献 target 与 bootstrap。它们都不需要导入 adapter 的内部 registry。Adapter 负责把 agreement 和 attachment 交给当前 DSH runtime 中相应协议的 participant。
 
 Carrier-specific metadata 不进入 command/tool/model 等领域 API。
 

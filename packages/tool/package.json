@@ -1,6 +1,7 @@
 {
   "name": "@dsh-std/tool",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

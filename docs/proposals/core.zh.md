@@ -35,13 +35,13 @@ Core 提供共同的声明外壳和协商入口。领域协议负责解释自身
 ```ts
 {
   apiVersion: 'connection.dsh/v1alpha1',
-  kind: 'Connection',
+  kind: 'ConnectionService',
 }
 ```
 
 协议包可以提供类型、schema、校验器、协商器、codec、状态机或一致性测试。这些代码是规范的可复用部件，不是产品实现。
 
-例如，`@dsh-std/connection` 可以实现 offer 校验、协商算法和通用状态机。Host、TUI、Web 或 GUI 仍需自行实现监听、认证、承载、调用分派和产品集成。其他语言的实现可以不使用 npm 包而实现同一协议。
+例如，`@dsh-std/connection` 可以定义应用消费的 `ConnectionService`，并提供 offer 校验、协商算法、codec 和通用状态机。Connection Host 实现监听、认证、承载、调用分派和产品集成；TUI、Web、GUI 与业务插件通过 service facade 使用连接，不分别实现这些基础设施。其他语言的 Host 可以不使用 npm 包而实现同一协议。
 
 ### 协议声明
 
@@ -105,9 +105,9 @@ Core 不把“找到同名 support”直接等同于协商成功。多实现选�
 
 每个参与者只声明本次实际理解和支持的协议。例如：
 
-- 一个无界面的后台进程可以只实现 connection 和 agent-control；
-- TUI 可以实现 connection 与若干 presentation 协议；
-- Web 可以实现相同的 connection 协议，但提供另一组 presentation 协议；
+- 一个无界面的后台进程可以提供 ConnectionService 和 AgentControl；
+- TUI 可以要求 Connection Service，并实现若干 presentation 协议；
+- Web 可以要求相同的 Connection Service，但提供另一组 presentation 协议；
 - 只提供工具目录的组件可以实现 tool，而不实现 command。
 
 协商不会把未声明的协议视为缺陷。只有另一参与者将其列为必需 requirement 时，缺失才会使该次协商失败。
@@ -126,6 +126,10 @@ interface ApiReference {
 `apiVersion` 由协议 group 和版本组成，`kind` 标识该 group 中的协议。二者共同确定一份版本化协议。
 
 Core 可以解析版本标识并建立候选集合，但不假定同一 major 下的 alpha、beta 和 stable 必然互通。精确版本之外的兼容关系由该协议的 definition 声明。没有对应 definition 时，evaluator 不能声称已经完成该协议的协商。
+
+Core 不根据 group 名称判断协议是否属于某个标准集合。命名空间归属与保留规则、协议发布状态和目录收录规则由相应治理或分发机制规定，不属于协商算法。只要坐标、definition 和声明满足本协议，evaluator 对它们采用相同的校验与协商过程。
+
+目录收录不是协议可用性的必要条件。实现可以从静态目录、安装包、产品内建模块或显式配置取得 definition；目录也不能仅凭收录条目产生 live support。不同来源提供同一坐标但 definition 内容不一致时，evaluator 必须报告定义冲突，不能以发现顺序选择其一。
 
 ### Participant identity
 
@@ -156,6 +160,8 @@ interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, A
 - 协商结果可由其他符合规范的实现独立复算；
 - 注册顺序不影响结果；
 - definition 不因被注册而产生一项 live implementation。
+
+Evaluator 在解释一项协议专属 `spec` 前必须取得能够处理该坐标的 definition。Definition 的发现和装载先于依赖它的声明校验；装载 definition 所需的包格式、签名、信任和执行策略不属于 core。未知 required requirement 阻止该次协商；未知 optional requirement 作为未满足的可选项报告。未知 support 不得被当作已经理解或可以调用的实现。
 
 ### Negotiation result
 
@@ -244,7 +250,7 @@ Core 不能独自判断领域协议是否真正兼容。Evaluator 必须安装�
 
 ### Definition discovery
 
-需要确定静态工具和运行时如何按 `apiVersion`、`kind` 找到 schema、参考协商器与一致性测试，同时避免把 npm registry 作为唯一发现机制。
+静态工具和运行时需要按 `apiVersion`、`kind` 找到 schema、协商规则与一致性测试。发现机制可以使用多个目录或分发系统，但必须验证坐标与内容身份，并对同坐标冲突给出确定结果；npm registry 不是协议要求的唯一发现机制。
 
 ### Declaration revision
 
@@ -252,4 +258,4 @@ Core 不能独自判断领域协议是否真正兼容。Evaluator 必须安装�
 
 ### Shared schema vocabulary
 
-协议 definition 是否必须发布某一种 JSON Schema dialect，还是允许其他机器可读 schema 并通过 content type 标识，尚未确定。
+协议 definition 是否必须发布某一版本的 JSON Schema，还是允许其他机器可读 schema 并通过 content type 标识，尚未确定。

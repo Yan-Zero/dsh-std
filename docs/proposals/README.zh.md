@@ -2,8 +2,6 @@
 
 本目录收录 DSH Standard 的设计提案。提案没有编号；状态和日期记录在各文件开头。
 
-[omdsh-dev/community#23](https://github.com/omdsh-dev/community/issues/23) 是问题来源之一，不是已经通过的需求清单。Issue 评论中的建议彼此可能冲突，也可能只适用于某个实现；只有经当前项目明确确认或能由互操作需求独立推导的内容才进入协议正文。其余想法保留为备选或未决问题。
-
 状态含义：
 
 - **方向已确认，接口/格式草案**：职责边界已经确认，具体对象、API 或文件格式仍可修改；
@@ -35,11 +33,15 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 
 | 组件 | 提案 | 状态 |
 | --- | --- | --- |
-| `@dsh-std/connection` | [Endpoint Connection](endpoint-connection.zh.md) | 方向已确认，接口草案 |
+| `@dsh-std/connection` | [Connection Service and Endpoint Protocol](endpoint-connection.zh.md) | 方向已确认，接口草案 |
+| `@dsh-std/connection/wire` | [CBOR Connection Wire Profile](connection-wire.zh.md) | 草案 |
+| `@dsh-std/agent` | [Agent Control and Configuration](agent.zh.md) | 草案 |
+| `@dsh-std/workspace` | [Workspace Catalog and Session Membership](workspace.zh.md) | 草案 |
+| `@dsh-std/content` | [Content References and Transfer](content.zh.md) | 草案 |
 | `@dsh-std/command` | [Command Resources and Runtime](command.zh.md) | 草案 |
 | `@dsh-std/model` | [Model Provider Catalog](model.zh.md) | 草案 |
 | `@dsh-std/tool` | [Tool Discovery](tool.zh.md) | 草案 |
-| `@dsh-std/session` | [Session Event Vocabulary](session.zh.md) | 草案 |
+| `@dsh-std/session` | [Session Catalog, History and Events](session.zh.md) | 草案 |
 | `@dsh-std/presentation` | [Presentation Operations](presentation.zh.md) | 草案 |
 | `@dsh-std/ui` | [UI Contributions](ui-contribution.zh.md) | 探索性草案 |
 

@@ -101,7 +101,7 @@ interface ModelProviderHandler {
 }
 ```
 
-`ModelGenerateRequest` 使用本协议定义的 message、content block、tool schema、采样参数和调用用途。图片 block 携带宿主不透明的 reference；handler 只能通过 invocation-scoped `ModelExecutionContext.readImage()` 读取字节。取消由 `context.signal` 传递。
+`ModelGenerateRequest` 使用 `@dsh-std/content` 的 ContentBlock，并由本协议定义 message role、tool schema、采样参数和调用用途。图片和其他二进制 block 携带 ContentReference；handler 只能通过 invocation-scoped content client 读取已授权字节。取消由 `context.signal` 传递。
 
 Handler 由所属 facet 发布，并随 activation instance 一同撤销。Adapter 验证 handler 后，将它映射到产品自身的模型 registry。组件不得自行查找或调用某个产品 adapter。
 
@@ -141,4 +141,4 @@ Model descriptor 是多个 provider 的公共子集，无法表达 provider 特�
 
 ### Remote inference
 
-是否在 connection 上定义远端推理 capability，还是由 session/agent 协议承载完整的远端 Agent 执行，尚未确定。本提案中的 handler 是 endpoint 内部的 facet-to-runtime 边界。
+本提案中的 handler 是 endpoint 内部的 facet-to-runtime 边界。远端客户端控制完整 Agent 时使用 AgentControl，不因 ModelCatalog 可见就获得 prompt 或 token stream 调用。只有出现独立 Model execution provider/consumer 的互操作需求时，才定义相应调用协议。

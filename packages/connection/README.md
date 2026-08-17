@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-Two-endpoint capability negotiation and implementation-neutral invocation for the DSH Standard.
+The proposed design is documented in [Endpoint Connection](../../docs/proposals/endpoint-connection.zh.md). It separates the application-facing `ConnectionService` from the Connection Host provider SPI. The remainder of this page describes the current reference implementation, which does not yet complete that split.
+
+Host-provided communication service, two-endpoint capability negotiation, and implementation-neutral invocation for the DSH Standard.
 
 ## Endpoint offers
 
@@ -12,13 +14,15 @@ An endpoint offer contains an endpoint identity, a revision, and the live partic
 
 Each invocation binding is participant-scoped and plan-revision-scoped. A client for one participant cannot discover or invoke bindings granted to another participant.
 
-## Public connection API
+## Current reference API
 
 `StandardConnection` exposes endpoint identities, the active plan, consumer-scoped clients, plan-change observation, and close. `CapabilityClient.invoke()` returns an invocation id, a result promise, an asynchronous progress stream, and cancellation. Domain protocol packages own operation names and input, output, and progress values.
 
 `ConnectionBroker` selects one registered `ConnectionConnector` for an implementation-neutral target URI. Zero matches and multiple matches are both explicit errors. The broker does not expose the selected connector type through `StandardConnection`.
 
-This makes a remote Host one possible implementation rather than an architectural dependency. A Host connector may install or discover a remote service, authenticate, forward a port, reconnect, and implement `StandardConnection`. Another connector may use IPC or direct in-process calls. Protocol consumers communicate with `CapabilityClient` in either case and do not know that a Host exists.
+These types are an early reference implementation. They do not require a TUI, Web UI, GUI, or business plugin to register and operate its own connector. The protocol direction places the broker, connector/provider registry, carrier, and wire behind a Connection Host's `ConnectionService`. A consumer submits a target and uses scoped typed clients for the negotiated protocols.
+
+A Connection Host may install or discover a remote service, own authentication, ports, forwarding and reconnection, and produce the `StandardConnection`. An SSH target facet contributes resolution and bootstrap integration while system OpenSSH or another provider may supply the physical SSH implementation. Applications do not observe the selected provider, ports, credentials, or wire.
 
 ## Lifecycle
 
@@ -32,6 +36,7 @@ The `@dsh-std/connection/memory` export provides a process-local implementation 
 
 ## Known Limitations and Deferred Work
 
-- The package does not standardize discovery, authentication, encryption, reconnect policy, framing, or serialization.
+- The consumer-facing `ConnectionService` and Host provider SPI are not implemented in the current code yet.
+- The package does not yet standardize discovery, authentication, encryption, reconnect policy, framing, or serialization.
 - A connection has exactly two endpoints in `v1alpha1`; multi-party routing is composed from separate connections.
 - The capability helper requires one peer provider by default. Protocols that allow multiple providers must opt into and define that behavior explicitly.

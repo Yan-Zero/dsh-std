@@ -48,6 +48,10 @@ Plan compatible 后，产品实现再按 lifecycle proposal 执行加载和激�
 
 内建实现可以没有 manifest，但必须提供可归属的 participant identity 和 live declaration。第三方 participant 的 live support 必须受产生它的 facet 静态声明约束。
 
+Composition 接收经过 Manifest version 校验和投影的组件声明，不读取原始 JSON 字段。不同 Manifest 版本产生等价的 component、facet、protocol 和 extension 声明时，必须得到等价的 composition 结果。Plan 同时保留原始 Manifest digest、版本 identity 和 projection digest，以便诊断能够返回原始字段路径。
+
+Manifest annotation 只有在已注册的 composition rule 或显式 policy 声明理解它时才参与计划。未知、可忽略的 annotation 不改变兼容性；无法投影但被其 Manifest 版本声明为 required 的语义必须在进入 composition 前失败。
+
 ### Facet selection
 
 Composition 独立选择 component 中的各个 facets。选择条件至少包括：
@@ -74,6 +78,10 @@ Composition 不把 manifest 的潜在 supports 伪装成 live declarations。计
 2. lifecycle 创建 planned participant，激活 facet 并取得 staged supports 后，composition 才把实际 declarations 交给 core evaluator；definition 决定是否兼容以及 agreement 的内容。
 
 Preflight 成功不是协议 agreement。静态候选在运行时没有发布、少发布、校验失败或状态变化时，candidate plan 必须失败、回滚或重新组合。
+
+Definition catalog 不要求所有坐标来自同一目录。某项 definition 是否可用由本次 composition 的显式输入决定。未知 required requirement 产生阻止计划的 issue；未知 optional requirement 产生未满足的可选项。未知 potential support 不作为候选实现，也不能使 requirement 通过 preflight。
+
+同一坐标存在内容不一致的 definitions 时，输入无效。Composition 不能使用 definition、package 或 registry 的发现顺序解决冲突。
 
 Composition 不把所有协议统一解释成“一个 consumer 绑定一个 provider”。协议可以自行采用：
 

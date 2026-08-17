@@ -27,14 +27,18 @@ Core 不预设 resource、capability、provider、execution plane、endpoint 或
 Core 之上是彼此独立的协议。例如：
 
 - `connection` 定义 endpoint 如何提交 offer、形成 agreement，并在连接中保持双方一致；
+- `agent` 定义活动 Agent 的控制与配置；
+- `session` 定义持久 Session 的目录、历史和事件 vocabulary；
+- `workspace` 定义 Workspace 注册记录与 Session 归属；
+- `content` 定义跨协议共享的内容引用与传输；
 - `command` 定义命令目录与执行语义；
 - `tool` 定义工具发现和披露；
 - `model` 定义模型提供方目录；
 - `presentation` 定义一次交互中可以请求的表现操作。
 
-实现 connection 不会自动获得 command 或 tool。Connection 可以承载其他协议的数据和调用，但不解释这些业务。
+各领域协议分别声明版本和语义。Connection 承载领域协议的交互，但不解释领域数据。
 
-协议包可以包含参考代码。代码的范围取决于协议本身：简单协议可能只有类型与 schema；connection 可以包含协商器、codec、状态机和一致性检查。参考代码不替产品完成网络监听、进程管理、界面渲染或业务 handler。
+协议包可以包含类型、schema、codec、协商算法、状态机和一致性测试。提案标明其中哪些内容具有规范性。
 
 ## 产品实现
 
@@ -55,15 +59,7 @@ Core 之上是彼此独立的协议。例如：
                          按需实现协议
 ```
 
-例如：
-
-- Host 可以实现 connection 的 acceptor，并实现 agent-control；
-- Remote SSH 可以实现 connection 的一种 carrier；
-- TUI 和 Web 可以实现 connection 的 connector，也可以实现 presentation；
-- DSH adapter 可以把 command 或 tool 协议映射到 Harness 已有服务；
-- 另一个产品可以从头实现相同协议，不依赖 DSH adapter。
-
-规范中随附的 helper 只负责规范已经定义的确定性行为。文件系统、端口、认证凭据、进程、UI widget、Cordis service 和产品 policy 均由实现拥有。
+产品选择需要实现的协议，并将协议操作绑定到运行时能力。文件系统、网络、凭据、进程、界面和 policy 属于产品实现。
 
 ## 声明与协商
 
@@ -73,17 +69,15 @@ Core 之上是彼此独立的协议。例如：
 2. participant **支持**某份协议，因此当前存在符合该声明的实现；
 3. 一组 participant 对该协议形成了 **agreement**。
 
-三者不能相互推断。安装协议定义不表示运行时已经实现它；静态包清单中的潜在支持也不表示当前可用；agreement 也不自动授予越过产品权限边界的调用权。
+Evaluator knowledge、participant support 和 agreement 是分别声明和计算的状态。权限由相应协议或产品 policy 判定。
 
 Core 只调度协议 definition。具体协议决定自己需要几方参与、是否允许多个实现、如何选择版本、是否产生 binding，以及发生变化时如何重新协商。
 
 ## Connection
 
-Connection 是使用 core 元协议的一份独立协议，而不是 core 的固定传输层。
+Connection 是使用 core 元协议的一份独立协议。它定义 endpoint identity、offer、plan、binding、调用生命周期、attachment 传输和连接状态。
 
-Connection 定义 endpoint offer、双方接受的 plan、调用生命周期和连接状态。它可以提供足够具体的参考算法与状态机，使不同实现得到相同结果。它仍不处理 command、tool、session 或 agent 等业务。
-
-Host、TUI、Web 和 GUI 可以分别实现 connection。实际 carrier 可以是进程内调用、IPC、stdio、HTTP、WebSocket、SSH 转发、QUIC 或其他方式。协议是否统一 wire framing、认证、重连和流控，由 connection 及其配套 wire proposal 决定。
+Wire profile 定义 encoding、framing、认证绑定、流控和关闭过程。Carrier profile 定义 Connection 对底层通道的要求。
 
 ## 插件与组合
 
@@ -100,16 +94,16 @@ Component                    安装、版本和来源单位
         └── Participant      某次 core 协商中的运行实体
 ```
 
-第一版组件模型中，一个 activation instance 对应一个本地 participant；只提供 extension handler 时不必把空 declaration 交给 core。Manifest 记录到 facet 为止，不预先制造 live participant，也不把静态 supports 当作 live facts。
+Manifest 声明 component 和 facet。Facet 被激活后产生 activation instance；该 instance 可以在协商范围内发布 participant declaration。
 
-Facet 的 `activation` 是开放的版本化对象。产品 adapter 可以定义 Cordis、浏览器或其他 activation kind，并向 loader 注册相应 driver；core 不维护 `client/server`、`local/remote` 或 profile 枚举。Composition 只选择当前 loader 有明确 driver 且静态要求可以满足的 facets。
+Facet 的 `activation` 是开放的版本化对象。Activation definition 规定其参数，activation driver 执行生命周期操作。Composition 根据可用 definition、driver 和协议要求选择 facet。
 
 ## 包边界
 
 - [`@dsh-std/core`](../packages/core/README.zh.md) 定义可拔插协议的声明与协商元协议；
 - [`command`](../packages/command/README.zh.md)、[`model`](../packages/model/README.zh.md)、[`tool`](../packages/tool/README.zh.md)、[`session`](../packages/session/README.zh.md) 和 [`presentation`](../packages/presentation/README.zh.md) 分别定义领域协议；
 - [`@dsh-std/connection`](../packages/connection/README.zh.md) 定义 endpoint 连接协议及其参考实现部件；
-- [`@dsh-std/adapter-dsh`](../packages/adapter-dsh/README.zh.md) 是 DeepSeek Harness 的产品实现与映射层。
+- [`@dsh-std/adapter-dsh`](../packages/adapter-dsh/README.zh.md) 将标准协议映射到 DeepSeek Harness。
 
 标准包之间只建立提案中明确说明的依赖。新增领域协议不要求修改 core，也不要求已有实现采用它。
 

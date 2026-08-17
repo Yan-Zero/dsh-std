@@ -1,11 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
-import { API_VERSION, RUNTIME_KIND, commandRuntime, extensionDefinition, runtimeProtocol, runtimeSupport } from '../src/index.js'
+import { ProtocolCatalog, defineProtocolDeclaration } from '@dsh-std/core'
+import {
+  API_VERSION,
+  KIND,
+  RUNTIME_KIND,
+  commandRuntime,
+  extensionDefinition,
+  resourceProtocol,
+  resourceSupport,
+  runtimeProtocol,
+  runtimeSupport,
+} from '../src/index.js'
 
 describe('@dsh-std/command', () => {
   it('separates command resources from the callable Runtime dispatcher', () => {
     expect(extensionDefinition).toMatchObject({ kind: 'Command', validateSpec: expect.any(Function) })
+    expect(resourceProtocol).toMatchObject({ apiVersion: API_VERSION, kind: KIND })
+    expect(resourceSupport).toEqual({ apiVersion: API_VERSION, kind: KIND })
     expect(runtimeProtocol).toMatchObject({ apiVersion: API_VERSION, kind: RUNTIME_KIND })
     expect(runtimeSupport).toEqual({ apiVersion: API_VERSION, kind: RUNTIME_KIND })
+  })
+
+  it('negotiates Host support for Command resource publications without changing coordinates', () => {
+    const protocols = new ProtocolCatalog({ name: 'test', version: '1.0.0' })
+    protocols.register(resourceProtocol)
+    const requirement = defineProtocolDeclaration({
+      participant: { id: 'example.plugin' },
+      requires: [{ apiVersion: API_VERSION, kind: KIND }],
+    })
+    expect(protocols.negotiate([requirement]).compatible).toBe(false)
+    expect(protocols.negotiate([requirement, defineProtocolDeclaration({
+      participant: { id: 'example.host' }, supports: [resourceSupport],
+    })])).toMatchObject({ compatible: true, protocols: [{ apiVersion: API_VERSION, kind: KIND }] })
   })
 
   it('wraps generic connection invocation behind typed command methods', () => {

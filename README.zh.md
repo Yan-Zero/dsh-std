@@ -28,3 +28,7 @@ DSH Standard 是一组可以按需实现、彼此独立版本化的协议，用�
 pnpm install
 pnpm check
 ```
+
+## 许可证
+
+[MIT](LICENSE)

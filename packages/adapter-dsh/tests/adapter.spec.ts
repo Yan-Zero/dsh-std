@@ -171,14 +171,16 @@ describe('@dsh-std/adapter-dsh', () => {
       exports: { './standard': './standard.js' },
     }))
     writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
-      $schema: 'urn:dsh-std:draft:dsh-plugin:0.1.0',
-      manifestVersion: '0.1.0',
+      $schema: 'urn:example:dsh-plugin:0.15',
+      manifestVersion: '0.15',
       id: 'example.fixture.component',
       name: 'Fixture Component',
       version: '1.0.0',
-      apiVersion: '>=0.1.0 <0.2.0',
-      entrypoints: { host: 'fixture-component/standard' },
+      facets: { host: { entry: 'standard.js', apiVersion: 'v1alpha1' } },
+      requires: { contracts: [] },
+      permissions: [],
       contributes: {
+        commands: [],
         'x-dev.dsh-std.extensions': [{
           id: 'example.fixture.component.session-event',
           apiVersion: 'session.dsh/v1alpha1',
@@ -187,6 +189,7 @@ describe('@dsh-std/adapter-dsh', () => {
           spec: { description: 'Fixture event', replay: 'ignorable' },
         }],
       },
+      subscriptions: [],
     }))
     writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
 
@@ -198,6 +201,41 @@ describe('@dsh-std/adapter-dsh', () => {
     ]))
     for (const dispose of disposers) await dispose()
     expect((await adapter.snapshot()).facets.some(row => row.identity.component === 'example.fixture.component')).toBe(false)
+  })
+
+  it('loads a Community v0.15 host facet from a package-relative entry', async () => {
+    const { adapter } = await fixture()
+    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-community-profile-'))
+    temporaryRoots.push(profileDir)
+    const componentDir = join(profileDir, 'node_modules', 'community-component')
+    mkdirSync(join(componentDir, 'dist'), { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+      name: 'fixture-profile', private: true, dependencies: { 'community-component': '1.0.0' },
+    }))
+    writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
+      name: 'community-component', version: '1.0.0', type: 'module',
+    }))
+    writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
+      $schema: 'urn:example:dsh-plugin:0.15',
+      manifestVersion: '0.15',
+      id: 'example.community.component',
+      name: 'Community Component',
+      version: '1.0.0',
+      facets: { host: { entry: 'dist/host.js', apiVersion: 'v1alpha1' } },
+      requires: { contracts: [{ apiVersion: 'commands.dsh/v1alpha1', kind: 'Command' }] },
+      permissions: [],
+      contributes: { commands: [] },
+      subscriptions: [],
+    }))
+    writeFileSync(join(componentDir, 'dist', 'host.js'), 'export default { activate() {} }\n')
+
+    const disposers = await adapter.mountProfileComponents(profileDir)
+    expect((await adapter.snapshot()).facets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ identity: expect.objectContaining({
+        component: 'example.community.component', facet: 'host',
+      }) }),
+    ]))
+    for (const dispose of disposers) await dispose()
   })
 
   it('discovers from the profile directory URL supplied by the DSH bundle', async () => {
@@ -213,14 +251,16 @@ describe('@dsh-std/adapter-dsh', () => {
       exports: { './standard': './standard.js' },
     }))
     writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
-      $schema: 'urn:dsh-std:draft:dsh-plugin:0.1.0',
-      manifestVersion: '0.1.0',
+      $schema: 'urn:example:dsh-plugin:0.15',
+      manifestVersion: '0.15',
       id: 'example.fixture.from-profile-url',
       name: 'Fixture From Profile URL',
       version: '1.0.0',
-      apiVersion: '>=0.1.0 <0.2.0',
-      entrypoints: { host: 'fixture-component/standard' },
+      facets: { host: { entry: 'standard.js', apiVersion: 'v1alpha1' } },
+      requires: { contracts: [] },
+      permissions: [],
       contributes: {
+        commands: [],
         'x-dev.dsh-std.extensions': [{
           id: 'example.fixture.from-profile-url.model-provider',
           apiVersion: 'models.dsh/v1alpha1',
@@ -229,6 +269,7 @@ describe('@dsh-std/adapter-dsh', () => {
           spec: { title: 'Fixture Models' },
         }],
       },
+      subscriptions: [],
     }))
     writeFileSync(join(componentDir, 'standard.js'), `
 export default {

@@ -23,14 +23,18 @@ Core does not prescribe resources, capabilities, providers, execution planes, en
 Protocols above core evolve independently. For example:
 
 - connection defines endpoint offers, agreements, and connection-scoped attachments;
+- agent defines live Agent control and configuration;
+- session defines persistent catalogs, history, and event vocabulary;
+- workspace defines registered work locations and Session membership;
+- content defines shared content references and transfer;
 - command defines command catalogs and execution semantics;
 - tool defines tool discovery and disclosure;
 - model defines model-provider catalogs;
 - presentation defines invocation-scoped user-facing operations.
 
-Implementing connection does not imply implementing command or tool. Connection may carry their messages but does not interpret their business semantics.
+Each domain protocol declares its own versions and semantics. Connection carries domain protocol interactions without interpreting domain data.
 
-A protocol package may include reference code. A simple protocol may ship only types and schemas; connection may also ship negotiation, codecs, state machines, and conformance fixtures. Reference code does not replace the product's listeners, processes, UI, policy, or business handlers.
+A protocol package may contain types, schemas, codecs, negotiation algorithms, state machines, and conformance tests. Its proposal identifies the normative parts.
 
 ## Product implementations
 
@@ -40,8 +44,8 @@ A protocol package may include reference code. A simple protocol may ship only t
                               |
            +------------------+------------------+
            |                  |                  |
-       connection        command / tool      presentation
-       specification       specifications      specification
+       connection          command / tool      presentation
+       specification       specification       specification
            |                  |                  |
            +------------------+------------------+
                               |
@@ -49,9 +53,7 @@ A protocol package may include reference code. A simple protocol may ship only t
                     implement selected protocols
 ```
 
-A Host may implement a connection acceptor and agent-control protocols. A TUI or Web application may implement a connector and presentation protocols. Remote SSH may provide a connection carrier. A DSH adapter may map command or tool protocols to existing Harness services. Another product can implement the same protocols without importing the DSH adapter.
-
-Protocol helpers implement deterministic behavior already specified by a protocol. Filesystems, ports, credentials, processes, widgets, Cordis services, and product policy belong to implementations.
+A product selects protocols and binds their operations to runtime capabilities. Filesystems, networking, credentials, processes, user interfaces, and policy belong to the product implementation.
 
 ## Declarations and negotiation
 
@@ -61,17 +63,15 @@ Negotiation keeps three facts separate:
 2. a participant **supports** a protocol with a live implementation;
 3. a set of participants has formed an **agreement** for that protocol.
 
-Installing a protocol definition does not create a live implementation. Static package metadata does not prove current availability. An agreement does not bypass product authorization.
+Evaluator knowledge, participant support, and agreement are declared and calculated separately. Authorization is determined by the relevant protocol or product policy.
 
 Core dispatches to protocol definitions. Each protocol decides how many parties participate, whether multiple implementations are allowed, how versions and features are selected, and whether the result contains bindings or another composition model.
 
 ## Connection
 
-Connection is an independent protocol that uses core; it is not a built-in transport layer of core.
+Connection is an independent protocol built on core. It defines endpoint identities, offers, plans, bindings, invocation lifetimes, attachment transfer, and connection state.
 
-It defines endpoint offers, accepted plans, attachment lifetime, and connection state. Host, TUI, Web, and GUI applications can implement it over in-process calls, IPC, stdio, HTTP, WebSocket, SSH forwarding, QUIC, or another carrier.
-
-Domain messages remain owned by their protocols. Connection negotiates and carries them without executing commands, tools, sessions, agents, or UI operations itself.
+A wire profile defines encoding, framing, authentication binding, flow control, and closure. A carrier profile defines Connection's requirements on an underlying channel.
 
 ## Components and plugins
 
@@ -88,16 +88,16 @@ Component                    installation, version, and provenance unit
         └── Participant      live entity in a core negotiation scope
 ```
 
-In the first version of the component model, an activation instance corresponds to one local participant. A facet that only supplies extension handlers need not submit an empty declaration to core. A manifest stops at the facet: it neither creates a live participant nor turns a potential support into a live fact.
+A manifest declares components and facets. Activating a facet creates an activation instance, which may publish a participant declaration within a negotiation scope.
 
-A facet's `activation` is an open, versioned object. A product adapter may define Cordis, browser, or other activation kinds and register their drivers with its loader. Core does not maintain `client/server`, `local/remote`, or profile enums. Composition selects only facets for which the current loader has an explicit compatible driver and whose static requirements can be satisfied.
+A facet's `activation` is an open, versioned object. An activation definition specifies its parameters, and an activation driver performs lifecycle operations. Composition selects facets according to available definitions, drivers, and protocol requirements.
 
 ## Package boundaries
 
 - [`@dsh-std/core`](../packages/core/README.md) defines the meta-protocol for pluggable protocol declarations and negotiation;
-- [`command`](../packages/command/README.md), [`model`](../packages/model/README.md), [`tool`](../packages/tool/README.md), and [`presentation`](../packages/presentation/README.md) define independent domain protocols;
+- [`command`](../packages/command/README.md), [`model`](../packages/model/README.md), [`tool`](../packages/tool/README.md), [`session`](../packages/session/README.md), and [`presentation`](../packages/presentation/README.md) define independent domain protocols;
 - [`@dsh-std/connection`](../packages/connection/README.md) defines endpoint connection semantics and reusable reference components;
-- [`@dsh-std/adapter-dsh`](../packages/adapter-dsh/README.md) implements and maps selected protocols for DeepSeek Harness.
+- [`@dsh-std/adapter-dsh`](../packages/adapter-dsh/README.md) maps standard protocols to DeepSeek Harness.
 
 Only dependencies explicitly required by a protocol belong between standard packages. Adding a domain protocol does not require a core release or adoption by existing implementations.
 
