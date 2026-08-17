@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { defineProtocolDeclaration } from '@dsh-std/core'
 import { defineManifest } from '@dsh-std/manifest'
@@ -21,6 +22,7 @@ import {
   DSH_SESSION_API_VERSION,
   DSH_TOOL_API_VERSION,
   DshStandardAdapter,
+  default as dshStandardAdapterPlugin,
 } from '../src/index.js'
 
 let context: Context | undefined
@@ -200,7 +202,7 @@ spec:
     expect((await adapter.snapshot()).facets.some(row => row.identity.component === 'example.fixture.component')).toBe(false)
   })
 
-  it('discovers from the profile directory URL used by DSH', async () => {
+  it('discovers from the profile directory URL supplied by the DSH bundle', async () => {
     const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-profile-url-'))
     temporaryRoots.push(profileDir)
     const componentDir = join(profileDir, 'node_modules', 'fixture-component')
@@ -223,14 +225,35 @@ spec:
         apiVersion: lifecycle.dsh/v1alpha1
         kind: FacetModule
         spec: { module: fixture-component/standard }
+      extensions:
+        - apiVersion: models.dsh/v1alpha1
+          kind: ModelProvider
+          metadata: { name: fixture-models }
+          spec: { title: Fixture Models }
 `)
-    writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
+    writeFileSync(join(componentDir, 'standard.js'), `
+export default {
+  activate(context) {
+    context.extensions.publish(
+      { apiVersion: 'models.dsh/v1alpha1', kind: 'ModelProvider' },
+      'fixture-models',
+      {
+        async listModels() { return [{ id: 'fixture-model', name: 'Fixture Model' }] },
+        async *stream() {},
+      },
+    )
+  },
+}
+`)
 
     const ctx = new Context()
-    ctx.baseUrl = pathToFileURL(`${profileDir}/`).href
+    // Cordis scopes the plugin context to its package. The bundle evaluates
+    // profileBaseUrl in the root profile context before that scope is created.
+    ctx.baseUrl = pathToFileURL(`${join(profileDir, 'node_modules', '@dsh-std', 'adapter-dsh')}/`).href
     ctx.provide('agents', { get: () => undefined, list: () => [] } as never)
     await ctx.plugin(CommandRuntime)
-    await ctx.plugin(DshStandardAdapter, {})
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(dshStandardAdapterPlugin, { profileBaseUrl: pathToFileURL(`${profileDir}/`).href })
     const adapter = ctx.dshStd
     for (let attempt = 0; attempt < 20 && (await adapter.snapshot()).facets.length === 0; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 5))
@@ -239,6 +262,9 @@ spec:
       expect.objectContaining({ identity: expect.objectContaining({
         component: 'example.fixture.from-profile-url', facet: 'runtime',
       }) }),
+    ]))
+    expect(ctx.llm.listProviders()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'fixture-models' }),
     ]))
     await ctx.fiber.dispose()
   })

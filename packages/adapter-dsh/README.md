@@ -6,7 +6,14 @@ The DeepSeek Harness product adapter described by the [adapter proposal](../../d
 
 `DshStandardAdapter` owns protocol and manifest definition catalogs, activation drivers, a lifecycle coordinator, and a connection endpoint. It is not a global plugin registry.
 
-After discovering and validating `manifest.yaml`, a DSH loader passes only a composition-selected facet to `mount()`. The loader resolves its `adapter.dsh/v1alpha1 CordisEntrypoint` module; the adapter creates the scoped `ActivationContext`.
+This package is itself a DSH profile bundle and is activated by its `cordis.patch.yml`. It scans the active profile's ordinary dependencies for `manifest.yaml`, validates facets using the `lifecycle.dsh/v1alpha1 FacetModule` activation contract, and activates them through `mount()`. Standard components neither declare `dsh.bundle` nor import this adapter.
+
+```sh
+dsh plugin --profile web add @dsh-std/adapter-dsh
+dsh plugin --profile web add <standard-component>
+```
+
+Other hosts may call `mount()` directly. Module resolution and product-service projection remain responsibilities of the host adapter and do not enter the portable component.
 
 The entrypoint stages facts with `context.protocols.implement()` and `context.extensions.publish()`. They become live publications and connection declarations only after activation, static-bound validation, and protocol negotiation succeed. Failure or unmount revokes everything by activation-instance owner.
 

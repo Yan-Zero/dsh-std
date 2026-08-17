@@ -124,6 +124,8 @@ const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
 
 export interface AdapterConfig {
   readonly profile?: string
+  /** URL of the active DSH profile directory, supplied by the host bundle. */
+  readonly profileBaseUrl?: string
   readonly runtimeId?: string
   /** Discover standard component manifests from the active DSH profile. */
   readonly discover?: boolean
@@ -472,9 +474,10 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export class DshStandardAdapter extends TypertRemoteService {
-  static inject = ['agents', 'commands']
+  static inject = ['agents', 'commands', 'llm']
   static Config = z.object({
     profile: z.string(),
+    profileBaseUrl: z.string(),
     runtimeId: z.string().default('dsh'),
     discover: z.boolean().default(true),
   })
@@ -510,7 +513,12 @@ export class DshStandardAdapter extends TypertRemoteService {
     registerToolComposition(this.compositionRules)
     this.lifecycle = new LifecycleCoordinator(this.protocols, this.drivers, this.publications)
     const instanceId = randomUUID()
-    const profile = config.profile?.trim() || profileFromBaseUrl(ctx.baseUrl)
+    // A Loader entry's scoped context is anchored at the package that owns the
+    // entry. The active profile is therefore passed while the bundle patch is
+    // still evaluated in the root Loader context; guessing it from this
+    // plugin's ctx.baseUrl discovers the adapter package instead.
+    const profileBaseUrl = config.profileBaseUrl?.trim() || ctx.baseUrl
+    const profile = config.profile?.trim() || profileFromBaseUrl(profileBaseUrl)
     const declaration = defineProtocolDeclaration({
       participant: { id: ADAPTER_PARTICIPANT },
       supports: [commandRuntimeSupport, modelCatalogSupport],
@@ -557,16 +565,6 @@ export class DshStandardAdapter extends TypertRemoteService {
       }
       this.manifests.clear()
     }, '@dsh-std/adapter-dsh lifecycle')
-    if (config.discover !== false) {
-      ctx.effect(async () => {
-        const profileDir = profileDirectoryFromBaseUrl(ctx.baseUrl)
-        if (profileDir === undefined) return async () => undefined
-        const disposers = await this.mountProfileComponents(profileDir)
-        return async () => {
-          for (const dispose of [...disposers].reverse()) await dispose()
-        }
-      }, '@dsh-std/adapter-dsh component discovery')
-    }
     for (const initialize of REMOTE_INITIALIZERS) initialize.call(this)
   }
 
@@ -1049,4 +1047,25 @@ function nonEmpty(value: unknown, label: string): asserts value is string {
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
-export default DshStandardAdapter
+/**
+ * DSH Loader entrypoint. Component activation runs as plugin initialization,
+ * not inside a Cordis effect setup: product registrations such as
+ * `llm.registerAdapter()` create their own caller-owned effects and must not
+ * be nested under a still-pending setup effect on the same fiber.
+ */
+export async function apply(ctx: Context, config: AdapterConfig = {}): Promise<void> {
+  const adapter = new DshStandardAdapter(ctx, config)
+  if (config.discover === false) return
+  const profileBaseUrl = config.profileBaseUrl?.trim() || ctx.baseUrl
+  const profileDir = profileDirectoryFromBaseUrl(profileBaseUrl)
+  if (profileDir === undefined) return
+  const disposers = await adapter.mountProfileComponents(profileDir)
+  ctx.effect(() => async () => {
+    for (const dispose of [...disposers].reverse()) await dispose()
+  }, '@dsh-std/adapter-dsh component discovery')
+}
+
+apply.inject = DshStandardAdapter.inject
+apply.Config = DshStandardAdapter.Config
+
+export default apply

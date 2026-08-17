@@ -1,3 +1,5 @@
 - insert:
     - id: dsh-std-adapter
       name: '@dsh-std/adapter-dsh'
+      config:
+        profileBaseUrl: !!js ctx.baseUrl
