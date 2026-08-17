@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@dsh-std/core": ["packages/core/src/index.ts"],
+      "@dsh-std/manifest": ["packages/manifest/src/index.ts"],
+      "@dsh-std/composition": ["packages/composition/src/index.ts"],
+      "@dsh-std/lifecycle": ["packages/lifecycle/src/index.ts"],
+      "@dsh-std/sdk": ["packages/sdk/src/index.ts"],
+      "@dsh-std/connection": ["packages/connection/src/index.ts"],
+      "@dsh-std/command": ["packages/command/src/index.ts"],
+      "@dsh-std/model": ["packages/model/src/index.ts"],
+      "@dsh-std/tool": ["packages/tool/src/index.ts"],
+      "@dsh-std/presentation": ["packages/presentation/src/index.ts"]
+    },
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "types": ["node", "vitest/globals"]
+  }
+}

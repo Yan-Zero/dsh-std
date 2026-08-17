@@ -1,0 +1,27 @@
+{
+  "name": "dsh-std",
+  "version": "0.0.0-development",
+  "description": "Development namespace guard for the DSH plugin interoperability standard",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": "^22.19 || >=24"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "@dsh-std/adapter-dsh",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": ["lib"],
+  "scripts": {
+    "build": "pnpm run typecheck && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter \"@dsh-std/adapter-dsh^...\" build && vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-commands": "*",
+    "@deepseek-ai/dsh-attachment": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-typert-protocol": "*",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "dependencies": {
+    "@dsh-std/core": "workspace:*",
+    "@dsh-std/manifest": "workspace:*",
+    "@dsh-std/composition": "workspace:*",
+    "@dsh-std/lifecycle": "workspace:*",
+    "@dsh-std/connection": "workspace:*",
+    "@dsh-std/command": "workspace:*",
+    "@dsh-std/model": "workspace:*",
+    "@dsh-std/session": "workspace:*",
+    "@dsh-std/tool": "workspace:*",
+    "@dsh-std/presentation": "workspace:*",
+    "@dsh-std/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-attachment": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-commands": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-scope": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "engines": { "node": "^22.19 || >=24" }
+}

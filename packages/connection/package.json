@@ -1,0 +1,19 @@
+{
+  "name": "@dsh-std/connection",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./memory": { "types": "./lib/memory.d.ts", "default": "./lib/memory.js" }
+  },
+  "files": ["lib"],
+  "scripts": {
+    "build": "pnpm run typecheck && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": { "@dsh-std/core": "workspace:*" },
+  "engines": { "node": "^22.19 || >=24" }
+}

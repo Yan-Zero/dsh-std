@@ -1,0 +1,17 @@
+{
+  "name": "dsh-std-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm run build && pnpm -r test",
+    "check": "pnpm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,232 @@
+# `@dsh-std/adapter-dsh` 设计提案
+
+- 文档类型：设计提案
+- 状态：草案
+- 日期：2026-08-16
+
+## Summary
+
+`@dsh-std/adapter-dsh` 是 DeepSeek Harness 对 DSH Standard 的实现与适配层。它把 Cordis plugin、DSH command、Agent、workspace、UI 和其他产品服务映射到实现选择的标准协议。
+
+Adapter 不是可移植协议，也不是所有标准能力的中央注册表。它由一个小型基础层和按协议安装的映射组成；新增标准协议不要求修改 core，也不应让未使用该协议的 DSH profile 获得额外依赖。
+
+Cordis、Typert、DSH Agent 与具体 UI 类型只出现在 adapter 内部。
+
+## Motivation
+
+标准协议描述互操作语义，不知道 DeepSeek Harness 如何加载插件、定位 session、执行命令、注册 tool 或创建 UI。产品必须完成这些映射，但插件不应各自 patch 同一套内部 API，也不应让 Host、TUI 或 connector 依赖某个业务插件。
+
+DSH adapter 提供共同的产品边界：
+
+- 读取 `@dsh-std/manifest`，并识别 DSH 专属 activation kind；
+- 把 Cordis activation/disposal 映射到标准 lifecycle；
+- 为标准 protocol support、event subscription、permission grant 和 contribution 建立 owner；
+- 按需把 DSH 内部服务映射为 command、tool、model、presentation 或 connection 实现；
+- 向诊断与 provenance 报告映射失败，而不是把静态声明当作 live implementation。
+
+## Guide-level explanation
+
+### Base adapter
+
+基础层向 DSH profile 安装一个内部 composition service。该 service 管理：
+
+- 已验证的 component manifest 与 selected facets；
+- facet activation instance 与 lifecycle cleanup scope；
+- 当前 core protocol declarations；
+- permission decisions 与 scoped API issuer；
+- registration ownership 和诊断记录。
+
+这些是 DSH 实现细节。标准插件只通过 manifest、已协商协议 API 和 SDK facade 使用它们，不取得裸 Cordis context。
+
+Adapter 不存在时，DSH 按原有方式工作。其他插件不能假定标准 SDK backend 一定存在；需要它的 facet 由其 activation kind 或 DSH 产品依赖显式表达。
+
+### Bootstrap boundary
+
+Manifest 不能自行令宿主发现并执行 adapter。DSH 必须通过已有的正式插件安装或 profile 组合机制挂载基础 adapter；这是一次产品 bootstrap，不是每个标准 component 各自 patch DSH。
+
+基础 adapter 激活后向 DSH component loader 注册它实现的 activation definitions、drivers 和 SDK backend。此后安装器只需发现 `manifest.yaml`，composition 即可把 selected facet 交给匹配 driver。Component 不需要知道 `dsh-host`、TUI、Web 或 adapter 的内部 service 名称。
+
+若 DSH 尚未提供 component manifest discovery，过渡安装器可以生成普通 profile/plugin 配置以挂载已识别的 component，但不能修改 component 代码或把未选 facets 合并成一个入口。DSH 获得正式 discovery API 后应替换该过渡层，而不改变 manifest 或领域协议。
+
+### Protocol adapters
+
+每份领域协议可以有独立的 DSH mapping。例如：
+
+- command adapter 把 DSH 命令目录与执行入口映射为 command protocol；
+- tool adapter 从 Agent/ToolRuntime 生成 tool discovery，并按当前 policy 投影 schema；
+- model adapter 把已安装 provider 和动态状态映射为 model catalog；
+- presentation adapter 把 invocation-scoped operation 交给 TUI、Web 或其他 presentation participant；
+- connection adapter 为 DSH profile 创建 endpoint view、connector 或 acceptor。
+
+协议 adapter 在 activation 时向 core declaration 发布实际 support。加载了 adapter 包但底层 DSH service 不存在、配置未启用或初始化失败时，不发布该 support。
+
+### DSH activation kind
+
+`@dsh-std/manifest` 不定义通用 JavaScript entrypoint。Adapter 定义 DSH 专属 activation kind，例如：
+
+```yaml
+apiVersion: adapter.dsh/v1alpha1
+kind: CordisEntrypoint
+spec:
+  module: ./lib/index.js
+```
+
+DSH loader 校验路径和 schema 后，按 composition plan 激活所属 facet。每次 Cordis plugin activation 与标准 activation instance 建立 owner 关系。一个 component 中未被当前 profile 选择的其他 facets 不会因此加载，也不会令 plugin tree 等待其所需服务。
+
+### Publication
+
+领域 adapter 或 facet activation module 可以向基础层发布协议实现。Publication 至少包含：
+
+- activation instance owner；
+- core support declaration；
+- 对应协议 adapter 能校验的实现对象；
+- lifecycle cleanup；
+- 可选的动态状态读取器。
+
+基础层只负责 owner、静态范围和 lifecycle 的共同检查。Handler 类型、operation、目录和 connection message 均由相应协议 adapter 校验。
+
+成功 publication 在 facet activation instance 越过 lifecycle publication barrier 后进入 live declaration。失败或 disposal 会原子撤销该 owner 的声明与实现。
+
+## Reference-level explanation
+
+### Activation sequence
+
+一个带 DSH activation 的 facet 按以下顺序激活：
+
+1. 静态读取并校验 manifest；
+2. 由 composition 选择 facets，并计算协议、component relationship、extension 和 permission 的候选 plan；
+3. 为 selected facet 创建 activation instance、scope 与受限 SDK facade；
+4. 由 activation kind handler 加载经过验证的 Cordis module；
+5. 收集该 instance 注册的协议实现、event handler 和其他 contribution；
+6. 校验实际 publication 没有超出 manifest 与 grant；
+7. 越过 publication barrier，发布 live core declaration；
+8. 在停用、失败或 reload 时按 owner 撤销全部 registration。
+
+任一步失败都产生带 component、stage 和 path 的结构化诊断。Adapter 不保留半激活 publication。
+
+### Ownership
+
+每项映射结果都记录 activation instance owner。至少包括：
+
+- Cordis service 与 listener；
+- standard protocol support 与 attachment handler；
+- DSH command/tool/model 映射；
+- event subscription 与 interceptor；
+- UI contribution；
+- transitional hook、wrapper 或 patch；
+- background task 与临时资源。
+
+Owner record 使用 lifecycle cleanup scope。DSH 内部 API 无法提供 disposer 时，adapter 必须实现恢复逻辑或把该目标声明为不可安全热重载。
+
+### Protocol declarations
+
+Adapter 区分三类事实：
+
+- declared support：所属 facet 在 manifest 声称可能实现的上限；
+- staged support：当前 activation 已登记、尚未公开的实现；
+- live support：publication barrier 后能够参与 core/connection 协商的实现。
+
+连接 view 只能从 live support 生成 offer，并再次经过 peer policy 与 permission 裁剪。完整 profile inventory 不直接发送给对端。
+
+### Command mapping
+
+Command adapter 读取 selected facets 中的 `Command` extensions，并与 DSH 权威命令 registry 按 owner 对应。目录只返回同时满足以下条件的条目：
+
+- extension 已通过 command schema 校验；
+- 所属 facet activation instance 为 active；
+- DSH registry 中存在同一 owner 的实际 handler；
+- 当前 context 与 permission 允许显示和执行；
+- 需要的 presentation protocol 已在本次 invocation/connection 中协商。
+
+执行仍进入 DSH command service。Command adapter 负责把标准 context reference 映射到 Agent/session，并按 command protocol 生成结果。
+
+### Tool and model mapping
+
+Tool adapter 以 DSH 当前 ToolRuntime 为权威来源，manifest extension 只补充静态目录信息。工具是否可用、是否披露 schema 和是否允许调用分别由运行时状态与 policy 决定。
+
+`ToolOverride` handler 由所属 facet 发布。Adapter 将它应用到 DSH 的 Agent-scoped tool view，并为以后创建的 Agent 建立相同映射。Handler 只接收原工具定义并返回替换定义；Agent 枚举、ToolRuntime change event 和 scoped registration 属于 adapter。Composition 已拒绝同一 target 的多个 live owner。
+
+Model adapter 将 `ModelProviderHandler` 映射到 DSH 的 LLM registry。它把 DSH message、tool schema 和 attachment reference 转换为 model 标准类型，并将标准 stream chunk 转回 DSH stream；凭据始终由 provider handler 自己持有，不进入 adapter 或 connection catalog。没有可执行 handler 的 resource 只参与目录投影。
+
+### Session mapping
+
+Session adapter 将 selected facets 的 `SessionEvent` resources 映射到 DSH 会话事件 vocabulary。DSH 的内建事件集合构成基线，组件 contribution 按 activation instance 记录 owner；停用组件不会删除基线事件或其他 owner 的注册。
+
+事件写入仍使用 DSH Session API。Adapter 根据 `replay` 检查持久 envelope 是否具备相应的未知事件处理语义；不能保存 ignorable 标记的产品版本不声明完整支持该类写入。
+
+### Presentation mapping
+
+Presentation support 由当前用户侧 participant 发布，可以来自 TUI、Web、GUI 或其他客户端。DSH runtime 只在 invocation agreement 与 permission grant 覆盖的范围内取得 scoped presentation API。
+
+Device code、secret input、approval token 和其他短期值只存在于 invocation scope。Adapter 不把它们写入普通 session history 或可重放 event stream。
+
+### Connection mapping
+
+Connection adapter 可以实现 connector、acceptor 或二者。它从 DSH composition service 取得 live declarations，但只向 `@dsh-std/connection` 提交已经裁剪的 `EndpointConnectionView`。
+
+Host、Remote SSH、TUI 或 Web 不需要导入 adapter 的内部 registry。它们声明并实现 connection 标准接口；adapter 负责把 attachment 交给当前 DSH profile 中相应协议的 participant。
+
+Carrier-specific metadata 不进入 command/tool/model 等领域 API。
+
+### Hooks and product API drift
+
+当 DSH 尚无公开扩展点时，adapter 可以在内部使用定向 hook、method wrapper 或 loader patch。此类实现必须：
+
+- 绑定明确 owner 与 lifecycle scope；
+- 验证目标签名和适用版本；
+- 在目标不存在的 profile 中不注册等待不到的依赖；
+- 卸载时恢复原状态；
+- 把独占目标和版本范围报告给 composition/provenance；
+- 对 API 漂移给出结构化不兼容结果。
+
+标准插件依赖的是 adapter 提供的协议 API，不依赖 hook 目标。DSH 获得正式扩展点后可以替换内部映射，而不改变标准协议。
+
+Hook 只能位于 adapter 的产品映射或一次 bootstrap 边界。某个 component 若需要 adapter 尚未提供的 DSH 能力，应增加领域协议或 DSH 专属 extension/activation contract；不能在自身 activation 中重新 patch 同一个产品目标。
+
+## Security considerations
+
+Adapter 是 DSH 产品权限的执行点。标准 SDK facade 不能暴露超出 permission grant 的 Cordis、fs、net、session 或 UI 接口。
+
+来自 connection 的 participant id、agreement 或 message 不构成本地 component principal。Connection adapter 完成 plan lookup 后，领域 adapter 仍按本地 attachment scope、grant 和 DSH guard 执行。
+
+Adapter 在跨信任域前清理错误 stack、本地路径、凭据和内部 service object。
+
+## Drawbacks
+
+把领域映射拆成独立 adapter 会增加包和 registration 数量，但避免一个基础 service 随所有标准协议膨胀。
+
+旧 DSH API 若没有 owner、disposer 或 staging 状态，完整 publication barrier 需要 wrapper 或产品侧扩展点支持。
+
+同一标准协议可能存在多个 DSH mapping。Composition 必须显式选择或报告歧义，不能让后注册者覆盖前者。
+
+## Rationale and alternatives
+
+### 一个包含所有协议的全局 adapter
+
+这种实现会让 connection、UI、command 和 model 的更新相互绑定，也让不相关 profile 等待不存在的服务。基础层只保留共同 lifecycle/ownership，领域 mapping 按需安装。
+
+### 每个插件直接实现 Host RPC
+
+Host 和客户端将被迫认识每个插件。插件实现标准领域协议后，Host、TUI、Web 或 GUI 只需实现相同协议和 connection。
+
+### 从 Cordis plugin tree 推断 support
+
+Cordis entry active 只能证明插件回调结束，不能证明某项标准协议已有可用实现。Live support 来自经过协议 adapter 校验并越过 publication barrier 的 registration。
+
+### 把 DSH 类型加入标准协议
+
+其他产品与语言不使用 Cordis、Typert 或 Agent。产品类型止于 adapter，标准对象保持实现无关。
+
+## Unresolved questions
+
+### Base service API
+
+需要通过实际 command、tool 和 connection adapter 验证基础 publication/ownership API 的最小形状，再决定是否作为稳定的 DSH 插件开发接口发布。Facet module 不应再手写完整 registry snapshot；标准 SDK 的 `implement` 与 `publish` 应成为 facet-scoped publication 入口。
+
+### Existing plugin adoption
+
+传统 DSH plugin 没有 `manifest.yaml` 时，是由安装器生成过渡 manifest、由 adapter 提供 legacy participant，还是只在显式启用兼容层时纳入 composition，尚未确定。
+
+### Conformance
+
+每个领域 adapter 需要协议级 fixtures 和产品集成测试。哪些测试属于标准 conformance、哪些只验证 DSH mapping，将在 verification proposal 中定义。

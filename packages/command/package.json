@@ -1,0 +1,21 @@
+{
+  "name": "@dsh-std/command",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "files": ["lib"],
+  "scripts": {
+    "build": "pnpm run typecheck && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@dsh-std/core": "workspace:*",
+    "@dsh-std/manifest": "workspace:*",
+    "@dsh-std/connection": "workspace:*",
+    "@dsh-std/presentation": "workspace:*"
+  },
+  "engines": { "node": "^22.19 || >=24" }
+}
