@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-std-adapter
+      name: '@dsh-std/adapter-dsh'

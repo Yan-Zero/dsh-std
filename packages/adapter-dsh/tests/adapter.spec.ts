@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
@@ -197,6 +198,49 @@ spec:
     ]))
     for (const dispose of disposers) await dispose()
     expect((await adapter.snapshot()).facets.some(row => row.identity.component === 'example.fixture.component')).toBe(false)
+  })
+
+  it('discovers from the profile directory URL used by DSH', async () => {
+    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-profile-url-'))
+    temporaryRoots.push(profileDir)
+    const componentDir = join(profileDir, 'node_modules', 'fixture-component')
+    mkdirSync(componentDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+      name: 'fixture-profile', private: true, dependencies: { 'fixture-component': '1.0.0' },
+    }))
+    writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
+      name: 'fixture-component', version: '1.0.0', type: 'module',
+      exports: { './standard': './standard.js' },
+    }))
+    writeFileSync(join(componentDir, 'manifest.yaml'), `
+apiVersion: manifest.dsh/v1alpha1
+kind: Component
+metadata: { name: example.fixture.from-profile-url, version: 1.0.0 }
+spec:
+  facets:
+    - name: runtime
+      activation:
+        apiVersion: lifecycle.dsh/v1alpha1
+        kind: FacetModule
+        spec: { module: fixture-component/standard }
+`)
+    writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
+
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(`${profileDir}/`).href
+    ctx.provide('agents', { get: () => undefined, list: () => [] } as never)
+    await ctx.plugin(CommandRuntime)
+    await ctx.plugin(DshStandardAdapter, {})
+    const adapter = ctx.dshStd
+    for (let attempt = 0; attempt < 20 && (await adapter.snapshot()).facets.length === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect((await adapter.snapshot()).facets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ identity: expect.objectContaining({
+        component: 'example.fixture.from-profile-url', facet: 'runtime',
+      }) }),
+    ]))
+    await ctx.fiber.dispose()
   })
 
   it('describes live protocol declarations without exposing a plugin registry', async () => {

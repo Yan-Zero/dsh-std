@@ -1008,7 +1008,9 @@ function profileDirectoryFromBaseUrl(baseUrl: string | URL | undefined): string 
   if (baseUrl === undefined) return undefined
   try {
     const path = typeof baseUrl === 'string' ? fileURLToPath(new URL(baseUrl)) : fileURLToPath(baseUrl)
-    return dirname(path)
+    // DSH anchors Cordis at the profile directory itself. A file URL ending in
+    // `/` therefore resolves to that directory, not to a config file inside it.
+    return /[/\\]$/u.test(path) ? path.replace(/[/\\]+$/u, '') : dirname(path)
   } catch { return undefined }
 }
 
