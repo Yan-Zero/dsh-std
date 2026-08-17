@@ -1,104 +1,92 @@
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog } from '@dsh-std/core'
-import { API_VERSION, ManifestDefinitionCatalog, defineManifest, facetIdentity, parseManifest } from '../src/index.js'
+import {
+  MANIFEST_VERSION,
+  SCHEMA_ID,
+  STANDARD_EXTENSIONS_CONTRIBUTION,
+  ManifestDefinitionCatalog,
+  defineManifest,
+  facetIdentity,
+  parseManifest,
+  projectManifest,
+} from '../src/index.js'
 
 function manifest() {
   return defineManifest({
-    apiVersion: API_VERSION,
-    kind: 'Component',
-    metadata: { name: 'example.acme.codex', version: '1.0.0', displayName: 'Codex' },
-    spec: {
-      facets: [{
-        name: 'runtime',
-        activation: { apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint', spec: { module: './index.js' } },
-        protocols: {
-          requires: [{ apiVersion: 'presentation.dsh/v1alpha1', kind: 'OpenExternal', optional: true }],
-          supports: [{ apiVersion: 'models.dsh/v1alpha1', kind: 'Inference' }],
-        },
-        extensions: [{
-          apiVersion: 'tools.dsh/v1alpha1', kind: 'Tool', metadata: { name: 'imagegen' },
-          spec: { title: 'Image generation', description: 'Generate an image.' },
-        }],
+    $schema: SCHEMA_ID,
+    manifestVersion: MANIFEST_VERSION,
+    id: 'example.acme.codex',
+    name: 'Codex',
+    version: '1.0.0',
+    apiVersion: '>=0.1.0 <0.2.0',
+    entrypoints: { host: 'example-codex/standard' },
+    capabilities: {
+      required: { commands: '>=0.1.0 <0.2.0' },
+      optional: { 'presentation.open-external': '>=0.1.0 <0.2.0' },
+    },
+    contributes: {
+      commands: [{ id: 'example.acme.codex.command', title: 'Manage Codex' }],
+      [STANDARD_EXTENSIONS_CONTRIBUTION]: [{
+        id: 'example.acme.codex.model-provider',
+        apiVersion: 'models.dsh/v1alpha1',
+        kind: 'ModelProvider',
+        name: 'openai-codex',
+        spec: { title: 'OpenAI Codex' },
       }],
     },
   })
 }
 
 describe('@dsh-std/manifest', () => {
-  it('keeps component, facet, and runtime participant identities separate', () => {
-    const value = manifest()
-    expect(facetIdentity(value, value.spec.facets[0]!)).toEqual({
-      component: 'example.acme.codex', version: '1.0.0', facet: 'runtime',
+  it('parses the static dsh-plugin.json draft and keeps all version axes distinct', () => {
+    const parsed = parseManifest(JSON.stringify(manifest()), { source: 'dsh-plugin.json' })
+    expect(parsed).toMatchObject({
+      $schema: SCHEMA_ID,
+      manifestVersion: '0.1.0',
+      version: '1.0.0',
+      apiVersion: '>=0.1.0 <0.2.0',
     })
-    expect(value.spec.facets[0]).not.toHaveProperty('participant')
+    expect(Object.isFrozen(parsed)).toBe(true)
   })
 
-  it('rejects package-global capabilities and duplicate facets', () => {
-    expect(() => defineManifest({
-      ...structuredClone(manifest()),
-      spec: { facets: [{ name: 'same', extensions: [] }, { name: 'same', extensions: [] }] },
-    })).toThrow(/duplicate facet/)
-    expect(() => defineManifest({
-      ...structuredClone(manifest()),
-      spec: { ...manifest().spec, protocols: {} },
-    } as never)).toThrow(/unknown field "protocols"/)
+  it('requires the local canonical schema and rejects YAML or dynamic schema selection', () => {
+    expect(() => parseManifest('id: example.acme.codex')).toThrow(SyntaxError)
+    expect(() => defineManifest({ ...structuredClone(manifest()), $schema: 'https://example.test/schema.json' } as never)).toThrow(/\$schema/)
   })
 
-  it('distinguishes unknown definitions from invalid objects', () => {
+  it('keeps requirements, subscriptions, permissions, and contributions structurally separate', () => {
+    expect(() => defineManifest({
+      ...structuredClone(manifest()),
+      capabilities: {
+        required: { 'storage.local': '>=0.1.0 <0.2.0' },
+        optional: { 'storage.local': '>=0.1.0 <0.2.0' },
+      },
+    })).toThrow(/both required and optional/)
+    expect(() => defineManifest({ ...structuredClone(manifest()), provides: {} } as never)).toThrow(/unknown field "provides"/)
+  })
+
+  it('projects one host entrypoint into the host-internal activation model', () => {
+    const projected = projectManifest(manifest())
+    const facet = projected.spec.facets[0]!
+    expect(facetIdentity(projected, facet)).toEqual({ component: 'example.acme.codex', version: '1.0.0', facet: 'host' })
+    expect(facet.activation).toEqual({
+      apiVersion: 'lifecycle.dsh/v1alpha1', kind: 'FacetModule', spec: { module: 'example-codex/standard' },
+    })
+    expect(facet.extensions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'Command', metadata: expect.objectContaining({ name: 'command' }) }),
+      expect.objectContaining({ kind: 'ModelProvider', metadata: expect.objectContaining({ name: 'openai-codex' }) }),
+    ]))
+  })
+
+  it('validates projected objects against host-installed definitions', () => {
     const catalog = new ManifestDefinitionCatalog()
     const protocols = new ProtocolCatalog({ name: 'test', version: '1.0.0' })
-    expect(catalog.validate(manifest(), protocols)).toMatchObject({
+    expect(catalog.validate(projectManifest(manifest()), protocols)).toMatchObject({
       validator: { name: '@dsh-std/manifest', version: '0.1.0' },
       source: 'memory:',
       digest: expect.stringMatching(/^fnv1a32:/),
       compatible: true,
       issues: expect.arrayContaining([expect.objectContaining({ code: 'unknown-activation', severity: 'warning' })]),
     })
-    catalog.registerActivation({
-      apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint',
-      validateSpec(spec) {
-        if (typeof spec !== 'object' || spec === null || !('module' in spec)) throw new TypeError('module is required')
-        return spec
-      },
-    })
-    expect(catalog.validate(manifest(), protocols).issues.some(row => row.code === 'unknown-activation')).toBe(false)
-  })
-
-  it('leaves extension identity syntax to its definition', () => {
-    const value = defineManifest({
-      ...structuredClone(manifest()),
-      spec: { facets: [{
-        name: 'runtime',
-        extensions: [{
-          apiVersion: 'session.dsh/v1alpha1', kind: 'SessionEvent',
-          metadata: { name: 'web/example-event' }, spec: { description: 'Example', replay: 'required' },
-        }],
-      }] },
-    })
-    const catalog = new ManifestDefinitionCatalog()
-    catalog.registerExtension({
-      apiVersion: 'session.dsh/v1alpha1', kind: 'SessionEvent',
-      validateMetadata(metadata) {
-        if (!/^[a-z][a-z0-9-]*(?:\/[a-z][a-z0-9-]*)+$/u.test(metadata.name)) throw new TypeError('invalid event type')
-      },
-      validateSpec: spec => spec,
-    })
-    expect(catalog.validate(value).compatible).toBe(true)
-  })
-
-  it('parses YAML 1.2 before applying the manifest schema', () => {
-    const parsed = parseManifest(`
-apiVersion: manifest.dsh/v1alpha1
-kind: Component
-metadata:
-  name: example.yaml.component
-  version: 1.0.0
-spec:
-  facets:
-    - name: declarative
-      extensions: []
-`)
-    expect(parsed.metadata).toEqual({ name: 'example.yaml.component', version: '1.0.0' })
-    expect(Object.isFrozen(parsed)).toBe(true)
   })
 })

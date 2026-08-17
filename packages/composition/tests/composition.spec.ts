@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog } from '@dsh-std/core'
-import { defineManifest } from '@dsh-std/manifest'
+import { defineComponentManifest } from '@dsh-std/manifest'
 import { compose } from '../src/index.js'
 
 const protocols = new ProtocolCatalog({ name: 'test', version: '1.0.0' })
@@ -11,8 +11,8 @@ protocols.register({
   negotiate: () => ({ agreement: {} }),
 })
 
-const manifest = defineManifest({
-  apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+const manifest = defineComponentManifest({
+  apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
   metadata: { name: 'example.multi.surface', version: '1.0.0' },
   spec: { facets: [
     {
@@ -62,8 +62,8 @@ describe('@dsh-std/composition', () => {
   })
 
   it('reports denied permissions and soft component relationships distinctly', () => {
-    const value = defineManifest({
-      apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+    const value = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
       metadata: { name: 'example.permission.consumer', version: '1.0.0' },
       spec: {
         relationships: { recommends: { 'example.missing.helper': '^1.0.0' } },
@@ -85,8 +85,8 @@ describe('@dsh-std/composition', () => {
   })
 
   it('checks newly selected extensions against already-live facet owners', () => {
-    const declarative = defineManifest({
-      apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+    const declarative = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
       metadata: { name: 'example.command.second', version: '1.0.0' },
       spec: { facets: [{
         name: 'declarative',

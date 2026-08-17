@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CompositionRuleCatalog } from '@dsh-std/composition'
-import { defineManifest } from '@dsh-std/manifest'
+import { defineComponentManifest } from '@dsh-std/manifest'
 import {
   assertToolOverrideHandler,
   extensionDefinition,
@@ -34,8 +34,8 @@ describe('@dsh-std/tool', () => {
   })
 
   it('rejects multiple override owners for the same target', () => {
-    const extension = (name: string) => defineManifest({
-      apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+    const extension = (name: string) => defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
       metadata: { name: `example.${name}`, version: '1.0.0' },
       spec: { facets: [{ name: 'runtime', extensions: [{
         apiVersion: 'tools.dsh/v1alpha1', kind: 'ToolOverride',

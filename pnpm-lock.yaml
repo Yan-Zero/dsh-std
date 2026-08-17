@@ -137,9 +137,6 @@ importers:
       '@dsh-std/core':
         specifier: workspace:*
         version: link:../core
-      yaml:
-        specifier: ^2.8.1
-        version: 2.9.0
 
   packages/model:
     dependencies:
@@ -1552,7 +1549,8 @@ snapshots:
       siginfo: 2.0.0
       stackback: 0.0.2
 
-  yaml@2.9.0: {}
+  yaml@2.9.0:
+    optional: true
 
   yuku-ast@0.8.7:
     dependencies:

@@ -10,12 +10,52 @@ import {
   assertVersionRange,
   parseSemanticVersion,
 } from '@dsh-std/core'
-import { parseDocument } from 'yaml'
-
-export const API_VERSION = 'manifest.dsh/v1alpha1'
+export const SCHEMA_ID = 'urn:dsh-std:draft:dsh-plugin:0.1.0'
+export const MANIFEST_VERSION = '0.1.0'
+export const COMPONENT_API_VERSION = 'manifest.dsh/internal/v1alpha1'
+export const STANDARD_EXTENSIONS_CONTRIBUTION = 'x-dev.dsh-std.extensions'
 
 const COMPONENT_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)+$/u
 const LOCAL_NAME = /^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)*$/u
+
+export interface CapabilityRequirements {
+  readonly required?: Readonly<Record<string, string>>
+  readonly optional?: Readonly<Record<string, string>>
+}
+
+export interface EventSubscription {
+  readonly event: string
+  readonly version: string
+}
+
+export interface CommandContribution {
+  readonly id: string
+  readonly title: string
+  readonly titles?: Readonly<Record<string, string>>
+  readonly description?: string
+}
+
+/** A namespaced contribution point used while a dedicated v0.1 contract is not registered. */
+export interface StandardExtensionContribution<Spec = unknown> extends ApiReference {
+  readonly id: string
+  readonly name: string
+  readonly spec: Spec
+}
+
+export interface PluginManifest {
+  readonly $schema: typeof SCHEMA_ID
+  readonly manifestVersion: typeof MANIFEST_VERSION
+  readonly id: string
+  readonly name: string
+  readonly version: string
+  /** Community Host API compatibility range, not the manifest schema version. */
+  readonly apiVersion: string
+  readonly entrypoints: { readonly host: string }
+  readonly capabilities?: CapabilityRequirements
+  readonly permissions?: readonly PermissionRequest[]
+  readonly subscriptions?: readonly EventSubscription[]
+  readonly contributes?: Readonly<Record<string, readonly unknown[]>>
+}
 
 export interface ComponentRelationships {
   readonly depends?: Readonly<Record<string, VersionRange>>
@@ -57,7 +97,8 @@ export interface ComponentFacet {
 }
 
 export interface ComponentManifest {
-  readonly apiVersion: typeof API_VERSION
+  /** Host-internal projection. Portable packages publish PluginManifest instead. */
+  readonly apiVersion: typeof COMPONENT_API_VERSION
   readonly kind: 'Component'
   readonly metadata: {
     readonly name: string
@@ -129,7 +170,7 @@ export class ManifestDefinitionCatalog {
     protocols?: ProtocolCatalog,
     options: { readonly source?: string; readonly digest?: string } = {},
   ): ManifestValidationReport {
-    const manifest = defineManifest(manifestValue)
+    const manifest = defineComponentManifest(manifestValue)
     const issues: ManifestValidationIssue[] = []
     for (const [facetIndex, facet] of manifest.spec.facets.entries()) {
       const base = `/spec/facets/${facetIndex}`
@@ -178,31 +219,56 @@ export class ManifestDefinitionCatalog {
 
 export interface ParseManifestOptions {
   readonly source?: string
-  /** Resource guard only; aliases remain valid YAML 1.2 syntax. */
-  readonly maxAliasCount?: number
 }
 
-/** Parse one YAML 1.2 document without installing executable custom tag constructors. */
-export function parseManifest(source: string, options: ParseManifestOptions = {}): ComponentManifest {
+/** Parse the package-root dsh-plugin.json without executing plugin code or fetching a schema. */
+export function parseManifest(source: string, options: ParseManifestOptions = {}): PluginManifest {
   if (typeof source !== 'string') throw new TypeError('manifest source must be a string')
-  const document = parseDocument(source, { version: '1.2', schema: 'core', prettyErrors: true })
-  if (document.errors.length > 0) throw new SyntaxError(document.errors.map(error => error.message).join('; '))
-  if (document.contents === null) throw new TypeError('manifest.yaml must contain one document')
-  const value = document.toJS({ maxAliasCount: options.maxAliasCount ?? 100 })
-  try { return defineManifest(value as ComponentManifest) } catch (error) {
-    throw new TypeError(`${options.source ?? 'manifest.yaml'}: ${errorMessage(error)}`, { cause: error })
+  let value: unknown
+  try { value = JSON.parse(source) } catch (error) {
+    throw new SyntaxError(`${options.source ?? 'dsh-plugin.json'}: ${errorMessage(error)}`, { cause: error })
+  }
+  try { return defineManifest(value as PluginManifest) } catch (error) {
+    throw new TypeError(`${options.source ?? 'dsh-plugin.json'}: ${errorMessage(error)}`, { cause: error })
   }
 }
 
-export function defineManifest<const T extends ComponentManifest>(manifest: T): T {
+export function defineManifest<const T extends PluginManifest>(manifest: T): T {
   validateManifest(manifest)
   return deepFreeze(structuredClone(manifest))
 }
 
-export function validateManifest(value: unknown): asserts value is ComponentManifest {
+export function validateManifest(value: unknown): asserts value is PluginManifest {
+  if (!record(value)) throw new TypeError('plugin manifest must be an object')
+  exact(value, ['$schema', 'manifestVersion', 'id', 'name', 'version', 'apiVersion', 'entrypoints', 'capabilities', 'permissions', 'subscriptions', 'contributes'], 'plugin manifest')
+  if (value.$schema !== SCHEMA_ID) throw new TypeError(`unsupported plugin manifest $schema ${JSON.stringify(value.$schema)}`)
+  if (value.manifestVersion !== MANIFEST_VERSION) throw new TypeError(`unsupported plugin manifestVersion ${JSON.stringify(value.manifestVersion)}`)
+  namespaced(value.id, 'plugin manifest.id')
+  nonEmpty(value.name, 'plugin manifest.name')
+  nonEmpty(value.version, 'plugin manifest.version')
+  parseSemanticVersion(value.version)
+  versionRange(value.apiVersion, 'plugin manifest.apiVersion')
+  validateEntrypoints(value.entrypoints)
+  if (value.capabilities !== undefined) validateCapabilities(value.capabilities)
+  if (value.permissions !== undefined) validatePermissions(value.permissions, 'plugin manifest.permissions')
+  if (value.subscriptions !== undefined) validateSubscriptions(value.subscriptions)
+  if (value.contributes !== undefined) validateContributions(value.contributes)
+  if ((value.contributes as Record<string, unknown> | undefined)?.commands !== undefined
+    && !(value.capabilities as CapabilityRequirements | undefined)?.required?.commands) {
+    throw new TypeError('plugin manifest that contributes commands must require the commands capability')
+  }
+}
+
+/** Validate a host-internal Component/Facet projection. */
+export function defineComponentManifest<const T extends ComponentManifest>(manifest: T): T {
+  validateComponentManifest(manifest)
+  return deepFreeze(structuredClone(manifest))
+}
+
+export function validateComponentManifest(value: unknown): asserts value is ComponentManifest {
   if (!record(value)) throw new TypeError('component manifest must be an object')
   exact(value, ['apiVersion', 'kind', 'metadata', 'spec'], 'component manifest')
-  if (value.apiVersion !== API_VERSION) throw new TypeError(`unsupported component manifest apiVersion ${JSON.stringify(value.apiVersion)}`)
+  if (value.apiVersion !== COMPONENT_API_VERSION) throw new TypeError(`unsupported component manifest apiVersion ${JSON.stringify(value.apiVersion)}`)
   if (value.kind !== 'Component') throw new TypeError('component manifest kind must be "Component"')
   if (!record(value.metadata)) throw new TypeError('component metadata must be an object')
   exact(value.metadata, ['name', 'version', 'displayName'], 'component metadata')
@@ -223,6 +289,54 @@ export function validateManifest(value: unknown): asserts value is ComponentMani
   if (value.spec.relationships !== undefined) validateRelationships(value.spec.relationships, value.metadata.name as string)
 }
 
+/**
+ * Project the portable v0.1 plugin manifest into the existing host composition model.
+ * This is an implementation detail: plugins never publish Component/Facet manifests.
+ */
+export function projectManifest(manifestValue: PluginManifest): ComponentManifest {
+  const manifest = defineManifest(manifestValue)
+  const extensions: ManifestExtension[] = []
+  for (const contribution of manifest.contributes?.commands ?? []) {
+    const row = contribution as CommandContribution
+    extensions.push(Object.freeze({
+      apiVersion: 'commands.dsh/v1alpha1',
+      kind: 'Command',
+      metadata: Object.freeze({ name: localContributionName(row.id), labels: Object.freeze({ 'dsh.std/contribution-id': row.id }) }),
+      spec: Object.freeze({
+        title: row.title,
+        ...(row.titles === undefined ? {} : { titles: row.titles }),
+        ...(row.description === undefined ? {} : { description: row.description }),
+      }),
+    }))
+  }
+  for (const contribution of manifest.contributes?.[STANDARD_EXTENSIONS_CONTRIBUTION] ?? []) {
+    const row = contribution as StandardExtensionContribution
+    extensions.push(Object.freeze({
+      apiVersion: row.apiVersion,
+      kind: row.kind,
+      metadata: Object.freeze({ name: row.name, labels: Object.freeze({ 'dsh.std/contribution-id': row.id }) }),
+      spec: row.spec,
+    }))
+  }
+  return defineComponentManifest({
+    apiVersion: COMPONENT_API_VERSION,
+    kind: 'Component',
+    metadata: { name: manifest.id, displayName: manifest.name, version: manifest.version },
+    spec: {
+      facets: [{
+        name: 'host',
+        activation: {
+          apiVersion: 'lifecycle.dsh/v1alpha1',
+          kind: 'FacetModule',
+          spec: { module: manifest.entrypoints.host },
+        },
+        ...(extensions.length === 0 ? {} : { extensions }),
+        ...(manifest.permissions === undefined ? {} : { permissions: manifest.permissions }),
+      }],
+    },
+  })
+}
+
 export function facetIdentity(manifest: ComponentManifest, facet: ComponentFacet): FacetIdentity {
   if (!(manifest.spec.facets as readonly ComponentFacet[]).includes(facet)) {
     const found = manifest.spec.facets.find(candidate => candidate.name === facet.name)
@@ -237,6 +351,100 @@ export function facetKey(identity: FacetIdentity): string {
 
 export function findFacet(manifest: ComponentManifest, name: string): ComponentFacet | undefined {
   return manifest.spec.facets.find(facet => facet.name === name)
+}
+
+function validateEntrypoints(value: unknown): void {
+  if (!record(value)) throw new TypeError('plugin manifest.entrypoints must be an object')
+  exact(value, ['host'], 'plugin manifest.entrypoints')
+  nonEmpty(value.host, 'plugin manifest.entrypoints.host')
+  if (value.host.startsWith('/') || value.host.startsWith('\\') || /^[a-zA-Z]:[\\/]/u.test(value.host)) {
+    throw new TypeError('plugin manifest.entrypoints.host must be package-relative')
+  }
+  const segments = value.host.replaceAll('\\', '/').split('/')
+  if (segments.includes('..')) throw new TypeError('plugin manifest.entrypoints.host must remain inside the package')
+}
+
+function validateCapabilities(value: unknown): void {
+  if (!record(value)) throw new TypeError('plugin manifest.capabilities must be an object')
+  exact(value, ['required', 'optional'], 'plugin manifest.capabilities')
+  const seen = new Set<string>()
+  for (const direction of ['required', 'optional'] as const) {
+    const capabilities = value[direction]
+    if (capabilities === undefined) continue
+    if (!record(capabilities)) throw new TypeError(`plugin manifest.capabilities.${direction} must be an object`)
+    for (const [id, range] of Object.entries(capabilities)) {
+      capabilityId(id, `plugin manifest.capabilities.${direction} capability`)
+      if (seen.has(id)) throw new TypeError(`capability ${JSON.stringify(id)} cannot be both required and optional`)
+      versionRange(range, `plugin manifest.capabilities.${direction}.${id}`)
+      seen.add(id)
+    }
+  }
+}
+
+function validateSubscriptions(value: unknown): void {
+  if (!Array.isArray(value)) throw new TypeError('plugin manifest.subscriptions must be an array')
+  const seen = new Set<string>()
+  for (const [index, item] of value.entries()) {
+    const label = `plugin manifest.subscriptions[${index}]`
+    if (!record(item)) throw new TypeError(`${label} must be an object`)
+    exact(item, ['event', 'version'], label)
+    capabilityId(item.event, `${label}.event`)
+    versionRange(item.version, `${label}.version`)
+    if (seen.has(item.event)) throw new TypeError(`duplicate subscription ${JSON.stringify(item.event)}`)
+    seen.add(item.event)
+  }
+}
+
+function validateContributions(value: unknown): void {
+  if (!record(value)) throw new TypeError('plugin manifest.contributes must be an object')
+  for (const [point, contributions] of Object.entries(value)) {
+    if (point !== 'commands' && point !== STANDARD_EXTENSIONS_CONTRIBUTION && !point.startsWith('x-')) {
+      throw new TypeError(`unsupported contribution point ${JSON.stringify(point)}`)
+    }
+    if (!Array.isArray(contributions)) throw new TypeError(`plugin manifest.contributes.${point} must be an array`)
+    const ids = new Set<string>()
+    for (const [index, contribution] of contributions.entries()) {
+      const label = `plugin manifest.contributes.${point}[${index}]`
+      if (!record(contribution)) throw new TypeError(`${label} must be an object`)
+      namespaced(contribution.id, `${label}.id`)
+      if (ids.has(contribution.id)) throw new TypeError(`duplicate contribution id ${JSON.stringify(contribution.id)}`)
+      ids.add(contribution.id)
+      if (point === 'commands') validateCommandContribution(contribution, label)
+      else if (point === STANDARD_EXTENSIONS_CONTRIBUTION) validateStandardExtensionContribution(contribution, label)
+    }
+  }
+}
+
+function validateCommandContribution(value: Record<string, unknown>, label: string): void {
+  exact(value, ['id', 'title', 'titles', 'description'], label)
+  nonEmpty(value.title, `${label}.title`)
+  if (value.titles !== undefined) validateLabels(value.titles, `${label}.titles`)
+  if (value.description !== undefined) nonEmpty(value.description, `${label}.description`)
+}
+
+function validateStandardExtensionContribution(value: Record<string, unknown>, label: string): void {
+  exact(value, ['id', 'apiVersion', 'kind', 'name', 'spec'], label)
+  validateApiReference(value, label)
+  nonEmpty(value.name, `${label}.name`)
+  if (!Object.hasOwn(value, 'spec')) throw new TypeError(`${label}.spec is required`)
+}
+
+function capabilityId(value: unknown, label: string): asserts value is string {
+  if (value === 'commands' || value === 'storage.local' || value === 'messages.observe') return
+  if (typeof value !== 'string' || !/^(?:x-[a-z0-9][a-z0-9.-]*\.)?[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)+$/u.test(value)) {
+    throw new TypeError(`${label} must be a namespaced capability identifier`)
+  }
+}
+
+function versionRange(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string') throw new TypeError(`${label} must be a string`)
+  assertVersionRange(value)
+}
+
+function localContributionName(id: string): string {
+  const name = id.split('.').at(-1) ?? id
+  localName(name, 'contribution local name')
+  return name
 }
 
 function validateFacet(value: unknown, index: number): void {

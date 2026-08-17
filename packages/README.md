@@ -7,7 +7,7 @@ Each package owns one independently versioned part of the proposal. Consumers sh
 | Package | Responsibility | Depends on a product |
 |---|---|---|
 | [`@dsh-std/core`](core/README.md) | Protocol declarations, definition registration, and meta-negotiation | No |
-| [`@dsh-std/manifest`](manifest/README.md) | YAML 1.2 Component/Facet manifests and static validation | No |
+| [`@dsh-std/manifest`](manifest/README.md) | Draft `dsh-plugin.json` manifest, schema, and static validation | No |
 | [`@dsh-std/composition`](composition/README.md) | Facet selection, static preflight, and composition plans | No |
 | [`@dsh-std/lifecycle`](lifecycle/README.md) | Activation instances, cleanup, and the publication barrier | No |
 | [`@dsh-std/sdk`](sdk/README.md) | TypeScript facet and typed-protocol helpers | No |

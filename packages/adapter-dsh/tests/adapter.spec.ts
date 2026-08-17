@@ -8,7 +8,7 @@ import CommandRuntime from '@deepseek-ai/dsh-commands'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { defineProtocolDeclaration } from '@dsh-std/core'
-import { defineManifest } from '@dsh-std/manifest'
+import { defineComponentManifest } from '@dsh-std/manifest'
 import { StandardEndpointRuntime, resolveConnection } from '@dsh-std/connection'
 import {
   DSH_ACTIVATION_API_VERSION,
@@ -89,8 +89,8 @@ async function fixture(declarePresentation = true): Promise<{
   ctx.provide('tools', tools as never)
   await ctx.plugin(CommandRuntime)
   const adapter = new DshStandardAdapter(ctx, { profile: 'host' })
-  const manifest = defineManifest({
-    apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+  const manifest = defineComponentManifest({
+    apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
     metadata: { name: 'example.acme.account', displayName: 'Account', version: '1.0.0' },
     spec: {
       facets: [{
@@ -170,32 +170,30 @@ describe('@dsh-std/adapter-dsh', () => {
       name: 'fixture-component', version: '1.0.0', type: 'module',
       exports: { './standard': './standard.js' },
     }))
-    writeFileSync(join(componentDir, 'manifest.yaml'), `
-apiVersion: manifest.dsh/v1alpha1
-kind: Component
-metadata:
-  name: example.fixture.component
-  version: 1.0.0
-spec:
-  facets:
-    - name: runtime
-      activation:
-        apiVersion: lifecycle.dsh/v1alpha1
-        kind: FacetModule
-        spec:
-          module: fixture-component/standard
-      extensions:
-        - apiVersion: session.dsh/v1alpha1
-          kind: SessionEvent
-          metadata: { name: fixture/event }
-          spec: { description: Fixture event, replay: ignorable }
-`)
+    writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
+      $schema: 'urn:dsh-std:draft:dsh-plugin:0.1.0',
+      manifestVersion: '0.1.0',
+      id: 'example.fixture.component',
+      name: 'Fixture Component',
+      version: '1.0.0',
+      apiVersion: '>=0.1.0 <0.2.0',
+      entrypoints: { host: 'fixture-component/standard' },
+      contributes: {
+        'x-dev.dsh-std.extensions': [{
+          id: 'example.fixture.component.session-event',
+          apiVersion: 'session.dsh/v1alpha1',
+          kind: 'SessionEvent',
+          name: 'fixture/event',
+          spec: { description: 'Fixture event', replay: 'ignorable' },
+        }],
+      },
+    }))
     writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
 
     const disposers = await adapter.mountProfileComponents(profileDir)
     expect((await adapter.snapshot()).facets).toEqual(expect.arrayContaining([
       expect.objectContaining({ identity: expect.objectContaining({
-        component: 'example.fixture.component', facet: 'runtime',
+          component: 'example.fixture.component', facet: 'host',
       }) }),
     ]))
     for (const dispose of disposers) await dispose()
@@ -214,23 +212,24 @@ spec:
       name: 'fixture-component', version: '1.0.0', type: 'module',
       exports: { './standard': './standard.js' },
     }))
-    writeFileSync(join(componentDir, 'manifest.yaml'), `
-apiVersion: manifest.dsh/v1alpha1
-kind: Component
-metadata: { name: example.fixture.from-profile-url, version: 1.0.0 }
-spec:
-  facets:
-    - name: runtime
-      activation:
-        apiVersion: lifecycle.dsh/v1alpha1
-        kind: FacetModule
-        spec: { module: fixture-component/standard }
-      extensions:
-        - apiVersion: models.dsh/v1alpha1
-          kind: ModelProvider
-          metadata: { name: fixture-models }
-          spec: { title: Fixture Models }
-`)
+    writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
+      $schema: 'urn:dsh-std:draft:dsh-plugin:0.1.0',
+      manifestVersion: '0.1.0',
+      id: 'example.fixture.from-profile-url',
+      name: 'Fixture From Profile URL',
+      version: '1.0.0',
+      apiVersion: '>=0.1.0 <0.2.0',
+      entrypoints: { host: 'fixture-component/standard' },
+      contributes: {
+        'x-dev.dsh-std.extensions': [{
+          id: 'example.fixture.from-profile-url.model-provider',
+          apiVersion: 'models.dsh/v1alpha1',
+          kind: 'ModelProvider',
+          name: 'fixture-models',
+          spec: { title: 'Fixture Models' },
+        }],
+      },
+    }))
     writeFileSync(join(componentDir, 'standard.js'), `
 export default {
   activate(context) {
@@ -260,7 +259,7 @@ export default {
     }
     expect((await adapter.snapshot()).facets).toEqual(expect.arrayContaining([
       expect.objectContaining({ identity: expect.objectContaining({
-        component: 'example.fixture.from-profile-url', facet: 'runtime',
+        component: 'example.fixture.from-profile-url', facet: 'host',
       }) }),
     ]))
     expect(ctx.llm.listProviders()).toEqual(expect.arrayContaining([
@@ -301,8 +300,8 @@ export default {
     const { adapter } = await fixture()
     const before = adapter.publications.list().length
     await expect(adapter.mount({
-      manifest: defineManifest({
-        apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
         metadata: { name: 'example.acme.broken', version: '1.0.0' },
         spec: { facets: [{
           name: 'runtime',
@@ -326,8 +325,8 @@ export default {
   it('rejects an extension identity already owned by a live facet', async () => {
     const { adapter } = await fixture()
     await expect(adapter.mount({
-      manifest: defineManifest({
-        apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
         metadata: { name: 'example.acme.duplicate', version: '1.0.0' },
         spec: { facets: [{
           name: 'runtime',
@@ -402,8 +401,8 @@ export default {
     const original = { name: 'read_image' }
     tools.setGlobal(original)
     const dispose = await adapter.mount({
-      manifest: defineManifest({
-        apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
         metadata: { name: 'example.acme.image', version: '1.0.0' },
         spec: { facets: [{
           name: 'runtime',
@@ -434,8 +433,8 @@ export default {
     const type = 'example/acme-event'
     expect(KNOWN_SESSION_EVENT_TYPES.has(type)).toBe(false)
     const dispose = await adapter.mount({
-      manifest: defineManifest({
-        apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+      manifest: defineComponentManifest({
+        apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
         metadata: { name: 'example.acme.events', version: '1.0.0' },
         spec: { facets: [{
           name: 'runtime',

@@ -4,16 +4,16 @@
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
-  "files": ["lib"],
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./schema/dsh-plugin-0.1.0.schema.json": "./schema/dsh-plugin-0.1.0.schema.json"
+  },
+  "files": ["lib", "schema"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@dsh-std/core": "workspace:*",
-    "yaml": "^2.8.1"
-  },
+  "dependencies": { "@dsh-std/core": "workspace:*" },
   "engines": { "node": "^22.19 || >=24" }
 }

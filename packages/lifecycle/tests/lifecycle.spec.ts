@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog } from '@dsh-std/core'
 import { compose } from '@dsh-std/composition'
-import { defineManifest } from '@dsh-std/manifest'
+import { defineComponentManifest } from '@dsh-std/manifest'
 import {
   ActivationDriverRegistry,
   FACET_MODULE_API_VERSION,
@@ -22,8 +22,8 @@ function fixture() {
         : { agreement: { available: input.supports.length > 0 } }
     },
   })
-  const manifest = defineManifest({
-    apiVersion: 'manifest.dsh/v1alpha1', kind: 'Component',
+  const manifest = defineComponentManifest({
+    apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
     metadata: { name: 'example.service.provider', version: '1.0.0' },
     spec: { facets: [{
       name: 'runtime',

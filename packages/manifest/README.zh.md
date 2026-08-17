@@ -1,5 +1,5 @@
 # @dsh-std/manifest
 
-DSH Standard 的静态 `manifest.yaml` 对象模型与 Component/Facet 校验器。`parseManifest()` 使用 YAML 1.2 解析单文档，再施加 manifest schema；`ManifestDefinitionCatalog` 生成带 validator、source、digest 与字段路径的结构化报告。
+社区插件草案的静态 `dsh-plugin.json` 对象模型、JSON Schema 与校验器。`parseManifest()` 不执行插件代码或联网取 schema；`projectManifest()` 只为当前 Host 内部的 Composition/Lifecycle 生成临时投影。
 
-设计见 [Manifest 提案](../../docs/proposals/manifest.zh.md)。
+当前 canonical identifier 是 dsh-std 自有的实验 URN，不代表 community#24 已经冻结正式 schema。

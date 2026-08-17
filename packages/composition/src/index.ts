@@ -8,7 +8,7 @@ import {
   type ProtocolSupport,
 } from '@dsh-std/core'
 import {
-  defineManifest,
+  defineComponentManifest,
   facetIdentity,
   facetKey,
   type ComponentFacet,
@@ -127,7 +127,7 @@ export class CompositionRuleCatalog {
 }
 
 export function compose(input: CompositionInput, rules = new CompositionRuleCatalog()): CompositionPlan {
-  const manifests = input.manifests.map(defineManifest).sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
+  const manifests = input.manifests.map(defineComponentManifest).sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
   const issues: CompositionIssue[] = []
   const byComponent = new Map<string, ComponentManifest>()
   for (const manifest of manifests) {

@@ -16,19 +16,22 @@ import z from '@deepseek-ai/schemastery'
 import {
   ProtocolCatalog,
   defineProtocolDeclaration,
+  satisfiesVersionRange,
   sameProtocol,
   type ProtocolRequirement,
   type ProtocolSupport,
 } from '@dsh-std/core'
 import {
   ManifestDefinitionCatalog,
-  defineManifest,
+  defineComponentManifest,
+  projectManifest,
   facetKey,
   findFacet,
   parseManifest,
   type ComponentManifest,
   type FacetIdentity,
   type ManifestExtension,
+  type PluginManifest,
 } from '@dsh-std/manifest'
 import { CompositionRuleCatalog, compose } from '@dsh-std/composition'
 import {
@@ -118,6 +121,9 @@ export const DSH_MODEL_CATALOG_KIND = MODEL_CATALOG_KIND
 export const DSH_TOOL_API_VERSION = TOOL_API_VERSION
 export const DSH_SESSION_API_VERSION = SESSION_API_VERSION
 export const DSH_PRESENTATION_API_VERSION = PRESENTATION_API_VERSION
+export const DSH_HOST_API_VERSION = '0.1.0'
+
+const DSH_HOST_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({ commands: '0.1.0' })
 
 const ADAPTER_COMPONENT = 'std.dsh.adapter-dsh'
 const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
@@ -578,9 +584,11 @@ export class DshStandardAdapter extends TypertRemoteService {
       for (const packageName of Object.keys(profile.dependencies ?? {}).sort()) {
         const packageDir = packageDirectory(manifestPath, packageName)
         if (packageDir === undefined) continue
-        const standardPath = join(packageDir, 'manifest.yaml')
+        const standardPath = join(packageDir, 'dsh-plugin.json')
         if (!existsSync(standardPath)) continue
-        const manifest = parseManifest(readFileSync(standardPath, 'utf8'), { source: standardPath })
+        const portableManifest = parseManifest(readFileSync(standardPath, 'utf8'), { source: standardPath })
+        assertHostCompatibility(portableManifest)
+        const manifest = projectManifest(portableManifest)
         for (const facet of manifest.spec.facets) {
           if (facet.activation?.apiVersion !== FACET_MODULE_API_VERSION
             || facet.activation.kind !== FACET_MODULE_KIND) continue
@@ -621,7 +629,7 @@ export class DshStandardAdapter extends TypertRemoteService {
 
   /** Activate exactly one manifest facet through the standard lifecycle publication barrier. */
   async mount(input: DshFacetPublication): Promise<() => Promise<void>> {
-    const manifest = defineManifest(input.manifest)
+    const manifest = defineComponentManifest(input.manifest)
     const facet = findFacet(manifest, input.facet)
     if (facet === undefined) throw new TypeError(`component has no facet ${JSON.stringify(input.facet)}`)
     if (facet.activation === undefined
@@ -1029,6 +1037,19 @@ function assertFacetModule(value: unknown, module: string): asserts value is Fac
   }
   if (value.snapshot !== undefined && typeof value.snapshot !== 'function') {
     throw new TypeError(`FacetModule ${JSON.stringify(module)} snapshot must be a function`)
+  }
+}
+
+function assertHostCompatibility(manifest: PluginManifest): void {
+  if (!satisfiesVersionRange(DSH_HOST_API_VERSION, manifest.apiVersion)) {
+    throw new Error(`plugin ${JSON.stringify(manifest.id)} requires Host API ${manifest.apiVersion}; adapter provides ${DSH_HOST_API_VERSION}`)
+  }
+  for (const [id, range] of Object.entries(manifest.capabilities?.required ?? {})) {
+    const provided = DSH_HOST_CAPABILITIES[id]
+    if (provided === undefined) throw new Error(`plugin ${JSON.stringify(manifest.id)} requires unavailable capability ${JSON.stringify(id)}`)
+    if (!satisfiesVersionRange(provided, range)) {
+      throw new Error(`plugin ${JSON.stringify(manifest.id)} requires capability ${id} ${range}; adapter provides ${provided}`)
+    }
   }
 }
 

@@ -18,7 +18,7 @@ Cordis、Typert、DSH Agent 与具体 UI 类型只出现在 adapter 内部。
 
 DSH adapter 提供共同的产品边界：
 
-- 读取 `@dsh-std/manifest`，并识别 DSH 专属 activation kind；
+- 读取 `@dsh-std/manifest` 的 `dsh-plugin.json`，并装载 Host entrypoint；
 - 把 Cordis activation/disposal 映射到标准 lifecycle；
 - 为标准 protocol support、event subscription、permission grant 和 contribution 建立 owner；
 - 按需把 DSH 内部服务映射为 command、tool、model、presentation 或 connection 实现；
@@ -44,7 +44,7 @@ Adapter 不存在时，DSH 按原有方式工作。其他插件不能假定标�
 
 Manifest 不能自行令宿主发现并执行 adapter。DSH 必须通过已有的正式插件安装或 profile 组合机制挂载基础 adapter；这是一次产品 bootstrap，不是每个标准 component 各自 patch DSH。
 
-基础 adapter 激活后向 DSH component loader 注册它实现的 activation definitions、drivers 和 SDK backend。此后安装器只需发现 `manifest.yaml`，composition 即可把 selected facet 交给匹配 driver。Component 不需要知道 `dsh-host`、TUI、Web 或 adapter 的内部 service 名称。
+基础 adapter 激活后向 DSH loader 注册它实现的 activation definitions、drivers 和 SDK backend。此后安装器发现 `dsh-plugin.json`，先检查 Host API 与 required capabilities，再把 `entrypoints.host` 投影到内部 activation。插件不需要知道 `dsh-host`、TUI、Web 或 adapter 的内部 service 名称。
 
 若 DSH 尚未提供 component manifest discovery，过渡安装器可以生成普通 profile/plugin 配置以挂载已识别的 component，但不能修改 component 代码或把未选 facets 合并成一个入口。DSH 获得正式 discovery API 后应替换该过渡层，而不改变 manifest 或领域协议。
 
@@ -225,7 +225,7 @@ Cordis entry active 只能证明插件回调结束，不能证明某项标准协
 
 ### Existing plugin adoption
 
-传统 DSH plugin 没有 `manifest.yaml` 时，是由安装器生成过渡 manifest、由 adapter 提供 legacy participant，还是只在显式启用兼容层时纳入 composition，尚未确定。
+传统 DSH plugin 没有 `dsh-plugin.json` 时，是由安装器生成过渡 manifest、由 adapter 提供 legacy participant，还是只在显式启用兼容层时纳入 composition，尚未确定。
 
 ### Conformance
 

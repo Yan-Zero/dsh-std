@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dsh-std:draft:dsh-plugin:0.1.0",
+  "title": "DSH community plugin manifest draft v0.1",
+  "type": "object",
+  "required": ["$schema", "manifestVersion", "id", "name", "version", "apiVersion", "entrypoints"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "urn:dsh-std:draft:dsh-plugin:0.1.0" },
+    "manifestVersion": { "const": "0.1.0" },
+    "id": { "$ref": "#/$defs/namespacedId" },
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "apiVersion": { "$ref": "#/$defs/versionRange" },
+    "entrypoints": {
+      "type": "object",
+      "required": ["host"],
+      "additionalProperties": false,
+      "properties": { "host": { "type": "string", "minLength": 1 } }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "$ref": "#/$defs/requirements" },
+        "optional": { "$ref": "#/$defs/requirements" }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "subscriptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event", "version"],
+        "additionalProperties": false,
+        "properties": {
+          "event": { "$ref": "#/$defs/capabilityId" },
+          "version": { "$ref": "#/$defs/versionRange" }
+        }
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/namespacedId" },
+              "title": { "type": "string", "minLength": 1 },
+              "titles": { "$ref": "#/$defs/stringMap" },
+              "description": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "x-dev.dsh-std.extensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "apiVersion", "kind", "name", "spec"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/namespacedId" },
+              "apiVersion": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "spec": true
+            }
+          }
+        }
+      },
+      "patternProperties": { "^x-(?!dev\\.dsh-std\\.extensions$)": { "type": "array" } },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "namespacedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)+$"
+    },
+    "versionRange": { "type": "string", "minLength": 1 },
+    "requirements": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/capabilityId" },
+      "additionalProperties": { "$ref": "#/$defs/versionRange" }
+    },
+    "capabilityId": {
+      "anyOf": [
+        { "enum": ["commands", "storage.local", "messages.observe"] },
+        { "$ref": "#/$defs/namespacedId" }
+      ]
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

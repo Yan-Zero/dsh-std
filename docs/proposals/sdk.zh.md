@@ -100,7 +100,7 @@ Backend 不是远端协议。跨进程操作仍通过 connection attachment 和�
 
 ### Manifest helpers
 
-SDK 可以提供 `defineManifest()`、`defineFacet()` 和协议 extension builder，以获得 TypeScript 类型检查。最终发布物仍包含静态 `manifest.yaml`；运行 JavaScript helper 不是读取 manifest 的前置条件。
+SDK 可以提供 `defineManifest()`、`definePlugin()` 和协议 contribution builder，以获得 TypeScript 类型检查。最终发布物仍包含静态 `dsh-plugin.json`；运行 JavaScript helper 不是读取 manifest 的前置条件。
 
 Builder 输出必须能规范化为 manifest schema，不能生成只有该 SDK 能解释的函数或 symbol。
 

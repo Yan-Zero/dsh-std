@@ -7,7 +7,7 @@
 | 包 | 职责 | 是否依赖具体产品 |
 |---|---|---|
 | [`@dsh-std/core`](core/README.zh.md) | 协议声明、definition 注册与协商元协议 | 否 |
-| [`@dsh-std/manifest`](manifest/README.zh.md) | YAML 1.2 Component/Facet 清单与静态校验 | 否 |
+| [`@dsh-std/manifest`](manifest/README.zh.md) | `dsh-plugin.json` 草案清单、schema 与静态校验 | 否 |
 | [`@dsh-std/composition`](composition/README.zh.md) | Facet 选择、静态 preflight 与组合计划 | 否 |
 | [`@dsh-std/lifecycle`](lifecycle/README.zh.md) | Activation instance、cleanup 与 publication barrier | 否 |
 | [`@dsh-std/sdk`](sdk/README.zh.md) | TypeScript facet 与 typed protocol helper | 否 |
