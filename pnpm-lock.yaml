@@ -138,6 +138,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/messages:
+    dependencies:
+      '@dsh-std/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/model:
     dependencies:
       '@dsh-std/command':
@@ -178,6 +184,12 @@ importers:
       '@dsh-std/manifest':
         specifier: workspace:*
         version: link:../manifest
+
+  packages/storage:
+    dependencies:
+      '@dsh-std/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/tool:
     dependencies:

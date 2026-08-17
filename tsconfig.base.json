@@ -12,6 +12,8 @@
       "@dsh-std/sdk": ["packages/sdk/src/index.ts"],
       "@dsh-std/connection": ["packages/connection/src/index.ts"],
       "@dsh-std/command": ["packages/command/src/index.ts"],
+      "@dsh-std/storage": ["packages/storage/src/index.ts"],
+      "@dsh-std/messages": ["packages/messages/src/index.ts"],
       "@dsh-std/model": ["packages/model/src/index.ts"],
       "@dsh-std/tool": ["packages/tool/src/index.ts"],
       "@dsh-std/presentation": ["packages/presentation/src/index.ts"]

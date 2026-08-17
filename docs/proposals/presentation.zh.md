@@ -87,31 +87,64 @@ Provider 对同一 request 只能提交一个 terminal result。Cancel 与 submi
 
 Consumer 必须处理 cancelled、expired 和 unavailable，不能把缺失交互当作用户批准或空字符串。
 
+### Invocation availability
+
+Host 可以向领域调用传入当前 invocation 可用的 Presentation agreement 投影：
+
+```ts
+interface PresentationDescriptor {
+  readonly clientId: string
+  readonly contracts: readonly ProtocolSupport[]
+}
+```
+
+Descriptor 不是新的 protocol kind，也不是静态 Host capability。`contracts` 必须来自当前 active agreements，`clientId` 必须由 Host 绑定到当前 Presentation endpoint；Consumer 不能提交任意 id 或 support 冒充 Provider。
+
+Descriptor 只用于目录可用性、fallback 选择和取得相应 typed client。Invocation 结束、agreement 替换、Endpoint detach 或授权撤销后，Host 必须使由它取得的 client 失效。Facet 禁止在 activation state 中缓存 Descriptor 或 client。
+
 ### Direct invocation
 
 协议实现按已协商的 kind 向 Consumer 提供类型化 client：
 
 ```ts
+type OpenExternalInput = Omit<OpenExternalRequest, keyof PresentationRequestContext>
+type CopyTextInput = Omit<CopyTextRequest, keyof PresentationRequestContext>
+type NotificationInput = Omit<NotificationRequest, keyof PresentationRequestContext>
+
 interface OpenExternalClient {
-  openExternal(request: OpenExternalRequest): Promise<PresentationResult<OpenExternalReceipt>>
+  openExternal(input: OpenExternalInput): Promise<PresentationResult<OpenExternalReceipt>>
 }
 
 interface CopyTextClient {
-  copyText(request: CopyTextRequest): Promise<PresentationResult<CopyTextReceipt>>
+  copyText(input: CopyTextInput): Promise<PresentationResult<CopyTextReceipt>>
 }
 
 interface NotificationClient {
-  notify(request: NotificationRequest): Promise<PresentationResult<NotificationReceipt>>
+  notify(input: NotificationInput): Promise<PresentationResult<NotificationReceipt>>
 }
 
 interface UserInteractionClient {
-  interact(request: QuestionRequest): Promise<PresentationResult<QuestionAnswers>>
-  interact(request: ApprovalRequest): Promise<PresentationResult<ApprovalValue>>
-  interact(request: SecretInputRequest): Promise<PresentationResult<SecretInputValue>>
+  interact(input: Omit<QuestionRequest, keyof PresentationRequestContext>): Promise<PresentationResult<QuestionAnswers>>
+  interact(input: Omit<ApprovalRequest, keyof PresentationRequestContext>): Promise<PresentationResult<ApprovalValue>>
+  interact(input: Omit<SecretInputRequest, keyof PresentationRequestContext>): Promise<PresentationResult<SecretInputValue>>
 }
 ```
 
-每个 Client 只对应一项 agreement。`UserInteractionClient` 只接受该 agreement 已协商且 invocation scope 已授权的 operation。它们都不提供任意 `kind`/payload dispatcher。
+Host 在创建 Client 时绑定 `requestId`、`invocationId`、`origin` 和 `deadline`。Consumer 只提交各 operation 自有的输入字段，不能覆盖这些上下文字段。每个 Client 只对应一项 agreement。`UserInteractionClient` 只接受该 agreement 已协商且 invocation scope 已授权的 operation。它们都不提供任意 `kind`/payload dispatcher。
+
+Host 可以把同一 invocation 的 Client 组织为：
+
+```ts
+interface PresentationClients {
+  readonly descriptor: PresentationDescriptor
+  readonly openExternal?: OpenExternalClient
+  readonly copyText?: CopyTextClient
+  readonly notification?: NotificationClient
+  readonly interaction?: UserInteractionClient
+}
+```
+
+可选成员只在对应 agreement 当前有效时存在。`descriptor.contracts` 不能单独产生 Client；Host 还必须持有该 Consumer 在当前 connection 上的有效 binding。
 
 在进程内，SDK 可以直接调用 provider implementation；在 Connection 上，双方使用对应 protocol attachment。两种方式保持相同的 request lifetime 和 result 语义。
 
@@ -186,9 +219,18 @@ interface UserInteractionSupportSpec {
   readonly operations: readonly UserInteractionOperation[]
   readonly limits?: UserInteractionLimits
 }
+
+interface UserInteractionLimits {
+  readonly maxConcurrentRequests?: number
+  readonly maxFields?: number
+  readonly maxOptionsPerField?: number
+  readonly maxTextLength?: number
+}
 ```
 
 Agreement 记录 provider、consumers、operations、并发 request 数、字段数、选项数和文本大小限制。支持 question 不表示支持 approval 或 secret-input。
+
+Limit 必须是正安全整数。Provider 可以省略 limit；省略不表示无限制，Connection 与产品 policy 仍可以施加更严格的有界限制。Consumer 必须同时遵守 agreement、Connection 和产品 policy 中最严格的限制。
 
 ### Question
 

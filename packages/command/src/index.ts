@@ -12,7 +12,11 @@ import type {
   CapabilityImplementation,
 } from '@dsh-std/connection'
 import { defineCapabilityProtocol } from '@dsh-std/connection'
-import type { Operation as PresentationOperation } from '@dsh-std/presentation'
+import {
+  validatePresentationDescriptor,
+  type PresentationClients,
+  type PresentationDescriptor,
+} from '@dsh-std/presentation'
 
 export const API_VERSION = 'commands.dsh/v1alpha1'
 export const KIND = 'Command'
@@ -66,11 +70,6 @@ export type CommandSpec = CommandNodeSpec
 
 export type CommandResource = ManifestExtension<CommandSpec>
 
-export interface CommandPresentationDescriptor {
-  readonly clientId: string
-  readonly contracts: readonly ProtocolSupport[]
-}
-
 export interface CommandOwnerReference {
   readonly component: string
   readonly facet: string
@@ -96,7 +95,7 @@ export interface CommandCatalog {
 export interface CommandCatalogInput {
   /** Opaque execution context selected by the consuming product. */
   readonly contextId: string
-  readonly presentation?: CommandPresentationDescriptor
+  readonly presentation?: PresentationDescriptor
 }
 
 export interface CommandExecutionInput extends CommandCatalogInput {
@@ -111,7 +110,6 @@ export interface CommandExecution {
     readonly text?: string
     readonly sourceEventSeq?: number
   }
-  readonly operations: readonly PresentationOperation[]
 }
 
 export type CommandRuntimeCall =
@@ -137,8 +135,8 @@ export interface CommandHandlerInput {
 
 export interface CommandHandlerContext {
   readonly signal: AbortSignal
-  readonly presentation?: CommandPresentationDescriptor
-  present(operation: PresentationOperation): boolean
+  /** Host-bound clients for Presentation agreements active in this invocation. */
+  readonly presentation?: PresentationClients
 }
 
 export interface CommandHandler {
@@ -257,10 +255,10 @@ function validateCatalogInput(value: unknown): CommandCatalogInput {
   if (!record(value)) throw new TypeError('CommandRuntime.catalog input must be an object')
   exact(value, ['contextId', 'presentation'], 'CommandRuntime.catalog input')
   text(value.contextId, 'CommandRuntime.catalog input.contextId')
-  if (value.presentation !== undefined) validatePresentation(value.presentation)
+  if (value.presentation !== undefined) validatePresentationDescriptor(value.presentation)
   return Object.freeze({
     contextId: value.contextId as string,
-    ...(value.presentation === undefined ? {} : { presentation: value.presentation as CommandPresentationDescriptor }),
+    ...(value.presentation === undefined ? {} : { presentation: value.presentation as PresentationDescriptor }),
   })
 }
 
@@ -273,19 +271,6 @@ function validateExecutionInput(value: unknown): CommandExecutionInput {
   })
   text(value.line, 'CommandRuntime.execute input.line')
   return Object.freeze({ ...catalog, line: value.line as string })
-}
-
-function validatePresentation(value: unknown): void {
-  if (!record(value)) throw new TypeError('CommandRuntime presentation must be an object')
-  exact(value, ['clientId', 'contracts'], 'CommandRuntime presentation')
-  text(value.clientId, 'CommandRuntime presentation.clientId')
-  if (!Array.isArray(value.contracts)) throw new TypeError('CommandRuntime presentation.contracts must be an array')
-  for (const contract of value.contracts) {
-    if (!record(contract)) throw new TypeError('CommandRuntime presentation contract must be an object')
-    exact(contract, ['apiVersion', 'kind', 'spec'], 'CommandRuntime presentation contract')
-    text(contract.apiVersion, 'CommandRuntime presentation contract.apiVersion')
-    text(contract.kind, 'CommandRuntime presentation contract.kind')
-  }
 }
 
 function validateNodeSpec(value: unknown, label: string): void {

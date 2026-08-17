@@ -78,7 +78,7 @@ Reference 指向一项已声明 command 及其子命令路径。它不是 shell 
 ```ts
 interface CommandCatalogInput {
   readonly contextId: string
-  readonly presentation?: CommandPresentationDescriptor
+  readonly presentation?: PresentationDescriptor
 }
 ```
 
@@ -94,7 +94,7 @@ Catalog 中不存在对应实际命令 handler 的 descriptor 不会成为可执
 - success 或 error result；
 - 可选文本和源事件序号。
 
-执行前，runtime 检查命令所属 activation instance 仍为 active，并检查必需 presentation contract。需要用户交互的 handler 通过 invocation-scoped `PresentationClient` 直接调用已经协商的 OpenExternal、Notification 或 UserInteraction；handler 不能调用所属 facet 未声明 requirement 的 presentation kind。
+执行前，runtime 检查命令所属 activation instance 仍为 active，并检查必需 presentation contract。需要用户交互的 handler 通过 invocation-scoped `PresentationClients` 直接调用已经协商的 OpenExternal、Notification 或 UserInteraction；handler 不能调用所属 facet 未声明 requirement 的 presentation kind。
 
 Presentation request 与 command invocation 共享 cancellation 和 deadline。Command result 不携带延迟执行的任意 UI operation；interaction 已经 settled 或 cancelled 后，Command 才返回依赖该结果的业务状态。
 

@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
@@ -61,7 +60,6 @@ import {
   type CommandDescriptor,
   type CommandExecution,
   type CommandHandler,
-  type CommandPresentationDescriptor,
   type CommandResource,
 } from '@dsh-std/command'
 import {
@@ -102,8 +100,7 @@ import {
   API_VERSION as PRESENTATION_API_VERSION,
   protocols as presentationProtocols,
   register as registerPresentation,
-  validateOperation,
-  type Operation as PresentationOperation,
+  type PresentationDescriptor,
 } from '@dsh-std/presentation'
 import type { FacetModule } from '@dsh-std/sdk'
 
@@ -174,16 +171,9 @@ export interface DshRuntimeSnapshot {
   readonly facets: readonly DshFacetSnapshot[]
 }
 
-export type DshPresentationDescriptor = CommandPresentationDescriptor
-export type DshPresentationOperation = PresentationOperation
+export type DshPresentationDescriptor = PresentationDescriptor
 export type DshCommandCatalog = CommandCatalog
 export type DshCommandExecution = CommandExecution
-
-interface InvocationStore {
-  readonly facet: MountedFacet
-  readonly presentation?: DshPresentationDescriptor
-  readonly operations: DshPresentationOperation[]
-}
 
 interface MountedFacet {
   readonly publication: DshFacetPublication
@@ -443,11 +433,7 @@ class DshStandardModelAdapter extends LlmAdapter {
 
 /** Product binding for executable standard Command extensions. */
 class DshCommandExtensionRegistry {
-  constructor(
-    private readonly commands: () => CommandRuntime,
-    private readonly presentation: () => DshPresentationDescriptor | undefined,
-    private readonly present: (operation: DshPresentationOperation) => boolean,
-  ) {}
+  constructor(private readonly commands: () => CommandRuntime) {}
 
   register(resource: CommandResource, candidate: unknown): () => void {
     assertCommandHandler(candidate)
@@ -457,14 +443,9 @@ class DshCommandExtensionRegistry {
       description: resource.spec.description ?? resource.spec.title,
       input: { hint: 'subcommand' },
       handler: invocation => {
-        const presentation = this.presentation()
         return handler.execute(
           { rawInput: invocation.rawInput },
-          {
-            signal: invocation.signal,
-            ...(presentation === undefined ? {} : { presentation }),
-            present: operation => this.present(operation),
-          },
+          { signal: invocation.signal },
         )
       },
     })
@@ -498,7 +479,6 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly facets = new Map<string, MountedFacet>()
   private readonly pending = new Map<string, DshFacetPublication>()
   private readonly activeEntrypoints = new Map<string, DshFacetPublication>()
-  private readonly invocation = new AsyncLocalStorage<InvocationStore>()
   private readonly toolOverrides: DshToolOverrideRegistry
   private readonly sessionEvents = new DshSessionEventRegistry()
   private readonly commandExtensions: DshCommandExtensionRegistry
@@ -507,11 +487,7 @@ export class DshStandardAdapter extends TypertRemoteService {
     super(ctx, 'dshStd', { namespace: DSH_STD_NAMESPACE })
     this.selfCtx = ctx
     this.toolOverrides = new DshToolOverrideRegistry(ctx)
-    this.commandExtensions = new DshCommandExtensionRegistry(
-      () => this.commands(),
-      () => this.presentation(),
-      operation => this.present(operation),
-    )
+    this.commandExtensions = new DshCommandExtensionRegistry(() => this.commands())
     registerToolComposition(this.compositionRules)
     this.lifecycle = new LifecycleCoordinator(this.protocols, this.drivers, this.publications)
     const instanceId = randomUUID()
@@ -742,31 +718,13 @@ export class DshStandardAdapter extends TypertRemoteService {
     if (facet === undefined) return undefined
     const missing = missingPresentation(facet.facet.protocols?.requires ?? [], presentation)
     if (missing.length > 0) throw new Error(`command requires unavailable presentation protocols: ${missing.map(row => `${row.apiVersion} ${row.kind}`).join(', ')}`)
-    const store: InvocationStore = { facet, ...(presentation === undefined ? {} : { presentation }), operations: [] }
-    return await this.invocation.run(store, async () => {
-      const execution = await this.commands().execute(this.agent(sessionId), line, signal)
-      if (execution === undefined) return undefined
-      return Object.freeze({
-        apiVersion: COMMAND_API_VERSION,
-        commandId: execution.commandId,
-        result: execution.result,
-        operations: Object.freeze([...store.operations]),
-      })
+    const execution = await this.commands().execute(this.agent(sessionId), line, signal)
+    if (execution === undefined) return undefined
+    return Object.freeze({
+      apiVersion: COMMAND_API_VERSION,
+      commandId: execution.commandId,
+      result: execution.result,
     })
-  }
-
-  presentation(): DshPresentationDescriptor | undefined { return this.invocation.getStore()?.presentation }
-
-  present(operation: DshPresentationOperation): boolean {
-    validateOperation(operation)
-    const store = this.invocation.getStore()
-    if (store === undefined) return false
-    const reference = { apiVersion: operation.apiVersion, kind: operation.kind }
-    const declared = (store.facet.facet.protocols?.requires ?? []).some(row => sameProtocol(row, reference))
-    if (!declared) throw new Error(`facet ${facetKey(identityOf(store.facet))} used undeclared protocol ${operation.apiVersion} ${operation.kind}`)
-    if (!(store.presentation?.contracts ?? []).some(row => sameProtocol(row, reference))) return false
-    store.operations.push(Object.freeze(structuredClone(operation)))
-    return true
   }
 
   private commandOwner(name: string): MountedFacet | undefined {

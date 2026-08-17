@@ -8,7 +8,7 @@ Named human-command resources and their shared callable Runtime dispatcher.
 
 A `Command` resource describes one root command and its nested subcommands. Nodes provide a title, localized titles, description, aliases, positional arguments, options, and child nodes. Arguments may be required, variadic, or restricted to documented values. Options declare every literal spelling and may accept one value.
 
-`CommandRuntime` defines the generic `catalog` and `execute` operations once for every command extension. A runtime adapter joins extensions published by active facets with its authoritative command registry and implements that capability. The execution context id remains opaque to the standard; a DSH adapter maps it to a session. Results contain the command outcome and validated presentation operations.
+`CommandRuntime` defines the generic `catalog` and `execute` operations once for every command extension. A runtime adapter joins extensions published by active facets with its authoritative command registry and implements that capability. The execution context id remains opaque to the standard; a DSH adapter maps it to a session. Results contain only the command outcome. Invocation-scoped UI work uses typed clients from `@dsh-std/presentation`.
 
 `commandRuntime()` wraps a consumer-scoped `CapabilityClient` with typed methods, and `commandRuntimeImplementation()` builds the operation dispatcher for an adapter. Consumers and adapters do not repeat operation strings or payload validation.
 
@@ -24,4 +24,3 @@ Fields prefixed with `x-` may carry experimental metadata. Portable clients igno
 
 - The contract does not define a command-line parser or quoting rules.
 - Dynamic completion is not part of `v1alpha1`; declared values are static.
-- Presentation operations are returned with the execution result until the connection RFC defines invocation-scoped reverse capability calls.

@@ -39,6 +39,8 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 | `@dsh-std/workspace` | [Workspace Catalog and Session Membership](workspace.zh.md) | 草案 |
 | `@dsh-std/content` | [Content References and Transfer](content.zh.md) | 草案 |
 | `@dsh-std/command` | [Command Resources and Runtime](command.zh.md) | 草案 |
+| `@dsh-std/storage` | [Local Component Storage](storage.zh.md) | 草案 |
+| `@dsh-std/messages` | [Message Observation](message-observer.zh.md) | 草案 |
 | `@dsh-std/model` | [Model Provider Catalog](model.zh.md) | 草案 |
 | `@dsh-std/tool` | [Tool Discovery](tool.zh.md) | 草案 |
 | `@dsh-std/session` | [Session Catalog, History and Events](session.zh.md) | 草案 |

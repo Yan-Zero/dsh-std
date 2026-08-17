@@ -10,7 +10,7 @@
 
 一项 `Command` 资源描述一个根命令及其嵌套子命令。节点可以提供标题、本地化标题、说明、别名、位置参数、选项和子节点。参数可以是必需、可变长或受已声明值限制；选项声明全部字面拼写，并可接收一个值。
 
-`CommandRuntime` 为全部命令 extension 统一定义 `catalog` 与 `execute` 操作。运行时适配器把 active facets 发布的 extension 与自身权威命令注册表关联，并实现该能力。执行上下文 id 对标准保持不透明；DSH 适配器将其映射为会话。结果包含命令结果与通过校验的表现操作。
+`CommandRuntime` 为全部命令 extension 统一定义 `catalog` 与 `execute` 操作。运行时适配器把 active facets 发布的 extension 与自身权威命令注册表关联，并实现该能力。执行上下文 id 对标准保持不透明；DSH 适配器将其映射为会话。结果只包含命令结果；调用作用域内的 UI 操作使用 `@dsh-std/presentation` 的类型化 client。
 
 `commandRuntime()` 用类型化方法包装按消费方隔离的 `CapabilityClient`，`commandRuntimeImplementation()` 为适配器创建操作分派器。消费方与适配器都无需重复操作字符串或载荷校验。
 
@@ -26,4 +26,3 @@
 
 - 协议不定义命令行解析器或引号规则。
 - `v1alpha1` 不包含动态补全；已声明值是静态的。
-- 在 connection RFC 定义调用作用域内的反向能力调用前，表现操作随执行结果返回。

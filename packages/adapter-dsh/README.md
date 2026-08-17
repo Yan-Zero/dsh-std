@@ -17,4 +17,4 @@ Other hosts may call `mount()` directly. Module resolution and product-service p
 
 The entrypoint stages facts with `context.protocols.implement()` and `context.extensions.publish()`. They become live publications and connection declarations only after activation, static-bound validation, and protocol negotiation succeed. Failure or unmount revokes everything by activation-instance owner.
 
-The current mappings implement `CommandRuntime` and `ModelCatalog`. Catalog entries come only from extensions published by active facets and retain component, facet, and participant provenance. Presentation operations remain invocation-scoped and require both a declared requirement and current client support.
+The current mappings implement `CommandRuntime` and `ModelCatalog`. Catalog entries come only from extensions published by active facets and retain component, facet, and participant provenance. The adapter does not serialize Presentation work into command results; a Connection Host must supply invocation-scoped typed clients for active Presentation agreements.

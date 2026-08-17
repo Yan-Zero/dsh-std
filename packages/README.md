@@ -12,6 +12,8 @@ Each package owns one independently versioned part of the proposal. Consumers sh
 | [`@dsh-std/lifecycle`](lifecycle/README.md) | Activation instances, cleanup, and the publication barrier | No |
 | [`@dsh-std/sdk`](sdk/README.md) | TypeScript facet and typed-protocol helpers | No |
 | [`@dsh-std/command`](command/README.md) | Declarative human-command trees | No |
+| [`@dsh-std/storage`](storage/README.md) | Component-private JSON key-value storage | No |
+| [`@dsh-std/messages`](messages/README.md) | Read-only message observation events | No |
 | [`@dsh-std/model`](model/README.md) | ModelProvider resources and the shared ModelCatalog | No |
 | [`@dsh-std/tool`](tool/README.md) | Tool discovery and live availability | No |
 | [`@dsh-std/presentation`](presentation/README.md) | Invocation-scoped user-facing operations | No |

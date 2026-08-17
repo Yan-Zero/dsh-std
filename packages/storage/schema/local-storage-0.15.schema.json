@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dsh-std:storage:local-storage:0.15",
+  "title": "LocalStorage v0.15 operations",
+  "$defs": {
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } }
+      ]
+    },
+    "getInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": { "key": { "type": "string", "minLength": 1 } }
+    },
+    "getOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": { "value": { "$ref": "#/$defs/jsonValue" } }
+    },
+    "setInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "value": { "$ref": "#/$defs/jsonValue" }
+      }
+    },
+    "setOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stored"],
+      "properties": { "stored": { "const": true } }
+    },
+    "deleteInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": { "key": { "type": "string", "minLength": 1 } }
+    },
+    "deleteOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deleted"],
+      "properties": { "deleted": { "type": "boolean" } }
+    }
+  }
+}

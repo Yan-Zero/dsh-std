@@ -144,14 +144,7 @@ async function fixture(declarePresentation = true): Promise<{
   })
   ctx.commands.register({
     name: 'account', description: 'Manage account', input: { hint: 'subcommand' },
-    handler: () => {
-      const opened = adapter.present({
-        apiVersion: DSH_PRESENTATION_API_VERSION,
-        kind: 'OpenExternal',
-        uri: 'https://example.test/login',
-      })
-      return { kind: 'success', text: opened ? 'opened' : 'copy the URL' }
-    },
+    handler: () => ({ kind: 'success', text: 'copy the URL' }),
   })
   return { adapter, events, agent, tools }
 }
@@ -416,25 +409,16 @@ export default {
     }] })
   })
 
-  it('executes commands and records only declared, available presentation operations', async () => {
+  it('returns command results without deferred presentation operations', async () => {
     const { adapter, events } = await fixture()
     await expect(adapter.execute(
       'session-1', '/account login', presentation(['OpenExternal']), new AbortController().signal,
-    )).resolves.toMatchObject({
-      result: { kind: 'success', text: 'opened' },
-      operations: [{ kind: 'OpenExternal', uri: 'https://example.test/login' }],
-    })
-    await expect(adapter.execute(
+    )).resolves.toEqual(expect.objectContaining({ result: { kind: 'success', text: 'copy the URL' } }))
+    const execution = await adapter.execute(
       'session-1', '/account login', presentation([]), new AbortController().signal,
-    )).resolves.toMatchObject({ result: { text: 'copy the URL' }, operations: [] })
+    )
+    expect(execution).not.toHaveProperty('operations')
     expect(events.map(event => event.type)).toEqual(['command/run', 'command/done', 'command/run', 'command/done'])
-  })
-
-  it('rejects a presentation operation that its facet did not declare', async () => {
-    const { adapter } = await fixture(false)
-    await expect(adapter.execute(
-      'session-1', '/account login', presentation(['OpenExternal']), new AbortController().signal,
-    )).rejects.toThrow(/undeclared protocol.*OpenExternal/)
   })
 
   it('maps ToolOverride ownership to every live DSH agent tool view', async () => {

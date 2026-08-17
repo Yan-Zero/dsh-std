@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-std/presentation",
+  "name": "@dsh-std/storage",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -7,15 +7,14 @@
   "types": "lib/index.d.ts",
   "exports": {
     ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
-    "./operations": { "types": "./lib/operations.d.ts", "default": "./lib/operations.js" },
-    "./interaction": { "types": "./lib/interaction.d.ts", "default": "./lib/interaction.js" }
+    "./schema/local-storage-0.15.json": "./schema/local-storage-0.15.schema.json"
   },
-  "files": ["lib"],
+  "files": ["lib", "schema"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@dsh-std/core": "workspace:*", "@dsh-std/connection": "workspace:*" },
+  "dependencies": { "@dsh-std/core": "workspace:*" },
   "engines": { "node": "^22.19 || >=24" }
 }

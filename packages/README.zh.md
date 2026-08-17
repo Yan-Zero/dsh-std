@@ -12,6 +12,8 @@
 | [`@dsh-std/lifecycle`](lifecycle/README.zh.md) | Activation instance、cleanup 与 publication barrier | 否 |
 | [`@dsh-std/sdk`](sdk/README.zh.md) | TypeScript facet 与 typed protocol helper | 否 |
 | [`@dsh-std/command`](command/README.zh.md) | 声明式用户命令树 | 否 |
+| [`@dsh-std/storage`](storage/README.zh.md) | Component 私有 JSON 键值存储 | 否 |
+| [`@dsh-std/messages`](messages/README.zh.md) | 只读消息观察事件 | 否 |
 | [`@dsh-std/model`](model/README.zh.md) | ModelProvider 资源与共享 ModelCatalog | 否 |
 | [`@dsh-std/tool`](tool/README.zh.md) | 工具发现与实时可用性 | 否 |
 | [`@dsh-std/presentation`](presentation/README.zh.md) | 调用作用域内面向用户的操作 | 否 |
