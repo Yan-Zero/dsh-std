@@ -10,7 +10,9 @@ DeepSeek Harness 的产品适配层。设计见 [DeepSeek Harness Adapter](../..
 
 在 Web profile 中，同一个包还通过 `dsh.client` 提供普通 DSH browser half。Host discovery 只有在原生 `clientModules` service 已经存在，并且组件声明了 `dsh.client.platform: "web"` 时，才会挂载该组件的 browser half。TUI 与 headless profile 会在读取、装载 browser metadata 之前返回；全部 Web peer 也是 optional。
 
-Browser half 持有 DSH 专属的 `SettingsSection` 与 `ToolCallView` surfaces。它用 `slots.inject()` 等待对应的原生 slot，通过协商为 Web facet 签发 activation-scoped `ui.dsh/v1alpha1 ContributionHost`，并在 facet 卸载时撤销全部 slot registration。组件通过 `@dsh-std/adapter-dsh/client` 的 `defineDshWebUiFacet()` 接入；原始 slot 名与 Cordis context 不进入可移植 UI 代码。
+Browser half 实现可选的 `@dsh-std/ui-browser` `SettingsSection` 与 `ToolCallView` surfaces。它用 `slots.inject()` 等待对应的原生 slot，通过协商为 browser-realm facet 签发 activation-scoped `ui.dsh/v1alpha1 ContributionHost`，并在 facet 卸载时撤销全部 slot registration。组件只导入 surface 协议包，不导入本 adapter；原始 DSH slot 名保留在 adapter 内。
+
+命令始终可以通过标准 `CommandRuntime` 执行。产品 UI 只有为精确 placement 坐标注册 provider 后，才会把匹配的命令投影到原生命令 registry。Web、Desktop、TUI 或其他 shell 不构成协议内置分类。
 
 Host 需要先发布内建 participant 时，可以用 `discover: false` 只启动 adapter core，并在这些 publication 就绪后挂载 `@dsh-std/adapter-dsh/profile-loader`。后者只执行 profile component discovery 与 activation，不会创建第二个 adapter。
 

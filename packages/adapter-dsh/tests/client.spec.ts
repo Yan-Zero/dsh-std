@@ -7,17 +7,17 @@ import {
   type ContributionHostClient,
 } from '@dsh-std/ui'
 import {
-  DshWebUiRuntime,
-  WEB_CLIENT_ACTIVATION_API_VERSION,
-  WEB_CLIENT_ACTIVATION_KIND,
-  WEB_SETTINGS_SECTION,
-  WEB_TOOL_CALL_VIEW,
-  webSettingsSectionRequirement,
-  webToolCallViewRequirement,
-  type DshWebLocalHost,
+  DshBrowserUiRuntime,
+  BROWSER_CLIENT_ACTIVATION_API_VERSION,
+  BROWSER_CLIENT_ACTIVATION_KIND,
+  BROWSER_SETTINGS_SECTION,
+  BROWSER_TOOL_CALL_VIEW,
+  browserSettingsSectionRequirement,
+  browserToolCallViewRequirement,
+  type DshBrowserLocalHost,
 } from '../src/client.js'
 
-describe('DSH Web UI adapter', () => {
+describe('DSH browser UI adapter', () => {
   it('maps negotiated local UI contributions to live Web slots and retracts them with the facet', async () => {
     const entries: Array<{ name: string; options: Record<string, unknown>; component: unknown }> = []
     const slots = {
@@ -36,7 +36,7 @@ describe('DSH Web UI adapter', () => {
     }
     const ctx = new Context()
     ctx.provide('slots', slots as never)
-    const runtime = new DshWebUiRuntime(ctx)
+    const runtime = new DshBrowserUiRuntime(ctx)
     const settingsComponent = (): null => null
     const toolComponent = (): null => null
     const manifest = defineComponentManifest({
@@ -46,13 +46,13 @@ describe('DSH Web UI adapter', () => {
       spec: { facets: [{
         name: 'web',
         activation: {
-          apiVersion: WEB_CLIENT_ACTIVATION_API_VERSION,
-          kind: WEB_CLIENT_ACTIVATION_KIND,
+          apiVersion: BROWSER_CLIENT_ACTIVATION_API_VERSION,
+          kind: BROWSER_CLIENT_ACTIVATION_KIND,
           spec: { module: './client.js' },
         },
         protocols: { requires: [contributionHostRequirement({ surfaces: [
-          webSettingsSectionRequirement(),
-          webToolCallViewRequirement(),
+          browserSettingsSectionRequirement(),
+          browserToolCallViewRequirement(),
         ] })] },
       }] },
     })
@@ -63,14 +63,14 @@ describe('DSH Web UI adapter', () => {
       expect(ui).toBeDefined()
       ui!.register({
         descriptor: {
-          id: 'account', surface: WEB_SETTINGS_SECTION,
+          id: 'account', surface: BROWSER_SETTINGS_SECTION,
           content: { label: 'Account', order: 15 },
         },
         localModule: { component: settingsComponent },
       })
       ui!.register({
         descriptor: {
-          id: 'imagegen', surface: WEB_TOOL_CALL_VIEW,
+          id: 'imagegen', surface: BROWSER_TOOL_CALL_VIEW,
           content: { tool: 'imagegen' },
         },
         localModule: { component: toolComponent },
@@ -110,29 +110,35 @@ describe('DSH Web UI adapter', () => {
       register: () => () => { localeDisposed = true },
       bind: () => (key: string) => `translated:${key}`,
     } as never)
-    ctx.provide('remote', { dshStd: { command: async () => ({
-      ok: true, value: { result: { kind: 'success', text: 'done' } },
-    }) } } as never)
+    const commandRemote = { command: async () => ({
+      ok: true,
+      value: {
+        apiVersion: 'commands.dsh/v1alpha1',
+        commandId: 'account.refresh',
+        result: { kind: 'success', text: 'done' },
+      },
+    } as const) }
+    ctx.provide('remote', { dshStd: commandRemote } as never)
     ctx.provide('sessions', { binding: () => ({ session: { readAttachment: async () => ({
       ok: true, value: { attachment: { mediaType: 'image/png', name: 'output.png' }, data: [1, 2, 3] },
     }) } }) } as never)
-    const runtime = new DshWebUiRuntime(ctx)
-    let host: DshWebLocalHost | undefined
+    const runtime = new DshBrowserUiRuntime(ctx, commandRemote)
+    let host: DshBrowserLocalHost | undefined
     const manifest = defineComponentManifest({
       apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
       metadata: { name: 'example.acme.web-services', version: '1.0.0' },
       spec: { facets: [{
         name: 'web',
-        activation: { apiVersion: WEB_CLIENT_ACTIVATION_API_VERSION, kind: WEB_CLIENT_ACTIVATION_KIND, spec: { module: './client.js' } },
-        protocols: { requires: [contributionHostRequirement({ surfaces: [webSettingsSectionRequirement()] })] },
+        activation: { apiVersion: BROWSER_CLIENT_ACTIVATION_API_VERSION, kind: BROWSER_CLIENT_ACTIVATION_KIND, spec: { module: './client.js' } },
+        protocols: { requires: [contributionHostRequirement({ surfaces: [browserSettingsSectionRequirement()] })] },
       }] },
     })
     const facet = defineFacet(activation => {
       activation.protocols.client<ContributionHostClient>({ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost' })!.register({
-        descriptor: { id: 'account', surface: WEB_SETTINGS_SECTION, content: { label: 'Account' } },
+        descriptor: { id: 'account', surface: BROWSER_SETTINGS_SECTION, content: { label: 'Account' } },
         localModule: {
           component: () => null,
-          setup(value: DshWebLocalHost) {
+          setup(value: DshBrowserLocalHost) {
             host = value
             const locale = value.locale('account', { en: { title: 'Account' } })
             return { label: () => locale.t('title'), dispose: locale.dispose }

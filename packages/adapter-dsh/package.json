@@ -1,6 +1,6 @@
 {
   "name": "@dsh-std/adapter-dsh",
-  "version": "0.1.0-rc1",
+  "version": "0.1.0-rc2",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/adapter-dsh" },
   "publishConfig": { "access": "public" },
@@ -20,6 +20,11 @@
       "types": "./lib/client-api.d.ts",
       "default": "./lib/client.js"
     },
+    "./typert": {
+      "types": "./lib/typert.d.ts",
+      "default": "./lib/typert.js"
+    },
+    "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": ["lib", "cordis.patch.yml", "CHANGELOG.md"],
@@ -59,9 +64,11 @@
     "@dsh-std/storage": "workspace:*",
     "@dsh-std/tool": "workspace:*",
     "@dsh-std/ui": "workspace:*",
+    "@dsh-std/ui-browser": "workspace:*",
     "@dsh-std/presentation": "workspace:*",
     "@dsh-std/sdk": "workspace:*",
-    "@dsh-std/workspace": "workspace:*"
+    "@dsh-std/workspace": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

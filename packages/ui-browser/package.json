@@ -1,24 +1,23 @@
 {
-  "name": "@dsh-std/command",
-  "version": "0.1.0-rc2",
+  "name": "@dsh-std/ui-browser",
+  "version": "0.1.0-rc1",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/command" },
+  "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/ui-browser" },
   "publishConfig": { "access": "public" },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
-  "files": ["lib", "CHANGELOG.md"],
+  "files": ["lib", "CHANGELOG.md", "README.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dsh-std/core": "workspace:*",
     "@dsh-std/manifest": "workspace:*",
-    "@dsh-std/connection": "workspace:*",
-    "@dsh-std/presentation": "workspace:*"
+    "@dsh-std/sdk": "workspace:*",
+    "@dsh-std/ui": "workspace:*"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

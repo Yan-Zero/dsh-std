@@ -1,9 +1,10 @@
-/** DeepSeek Harness Web mapping for local standard UI facets. */
+/** DeepSeek Harness browser-realm mapping for local standard UI facets. */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
+import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import {
   ProtocolCatalog,
   defineProtocolDeclaration,
@@ -14,7 +15,6 @@ import {
 import {
   defineComponentManifest,
   findFacet,
-  type ComponentManifest,
 } from '@dsh-std/manifest'
 import { compose, type CompositionPlan } from '@dsh-std/composition'
 import type {
@@ -33,85 +33,59 @@ import {
   type ContributionHostClient,
   type UiContributionProvider,
   type UiContributionRegistration,
-  type UiSurfaceRequirement,
 } from '@dsh-std/ui'
+import {
+  API_VERSION as BROWSER_UI_PROTOCOL_VERSION,
+  FACET_HOST_SERVICE,
+  LOCAL_MODULE_ACTIVATION_KIND,
+  SETTINGS_SECTION,
+  TOOL_CALL_VIEW,
+  defineBrowserUiFacet,
+  settingsSectionRequirement,
+  toolCallViewRequirement,
+  type SettingsSectionContent,
+  type ToolCallViewContent,
+  type BrowserUiAttachment,
+  type BrowserUiCommandResult,
+  type BrowserUiFacetHost,
+  type BrowserUiFacetInput,
+  type BrowserUiHost,
+  type BrowserUiLocaleBinding,
+  type BrowserUiView,
+  type BrowserUiViewBinding,
+} from '@dsh-std/ui-browser'
 
-export const WEB_UI_API_VERSION = 'web.ui.dsh/v1alpha1'
-export const WEB_SETTINGS_SECTION_KIND = 'SettingsSection'
-export const WEB_TOOL_CALL_VIEW_KIND = 'ToolCallView'
-export const WEB_CLIENT_ACTIVATION_API_VERSION = 'adapter.dsh/v1alpha1'
-export const WEB_CLIENT_ACTIVATION_KIND = 'WebClientModule'
+export const BROWSER_UI_API_VERSION = BROWSER_UI_PROTOCOL_VERSION
+export const BROWSER_SETTINGS_SECTION_KIND = SETTINGS_SECTION.kind
+export const BROWSER_TOOL_CALL_VIEW_KIND = TOOL_CALL_VIEW.kind
+export const BROWSER_CLIENT_ACTIVATION_API_VERSION = BROWSER_UI_PROTOCOL_VERSION
+export const BROWSER_CLIENT_ACTIVATION_KIND = LOCAL_MODULE_ACTIVATION_KIND
 
-export const WEB_SETTINGS_SECTION = Object.freeze({
-  apiVersion: WEB_UI_API_VERSION,
-  kind: WEB_SETTINGS_SECTION_KIND,
-})
+export const BROWSER_SETTINGS_SECTION = SETTINGS_SECTION
 
-export const WEB_TOOL_CALL_VIEW = Object.freeze({
-  apiVersion: WEB_UI_API_VERSION,
-  kind: WEB_TOOL_CALL_VIEW_KIND,
-})
+export const BROWSER_TOOL_CALL_VIEW = TOOL_CALL_VIEW
 
-export interface DshWebSettingsSectionContent {
-  readonly label: string
-  readonly order?: number
-}
+export type DshBrowserSettingsSectionContent = SettingsSectionContent
 
-export interface DshWebToolCallViewContent {
-  readonly tool: string
-}
+export type DshBrowserToolCallViewContent = ToolCallViewContent
 
-/** Same-page React value consumed by the DSH Web slot registry. */
-export interface DshWebLocalView {
-  readonly component: unknown
-  readonly inject?: (...args: unknown[]) => Record<string, unknown>
-  readonly locale?: string
-  /** A locale-following label thunk may accompany the JSON fallback label. */
-  readonly label?: string | (() => unknown)
-  readonly dispose?: () => void | Promise<void>
-  /** Resolve optional product services only while this contribution is live. */
-  readonly setup?: (host: DshWebLocalHost) => DshWebLocalViewBinding
-}
+/** Same-page React value consumed by the DSH browser slot registry. */
+export type DshBrowserLocalView = BrowserUiView
 
-export interface DshWebLocalViewBinding {
-  readonly inject?: (...args: unknown[]) => Record<string, unknown>
-  readonly locale?: string
-  readonly label?: string | (() => unknown)
-  readonly dispose?: () => void | Promise<void>
-}
+export type DshBrowserLocalViewBinding = BrowserUiViewBinding
 
-export interface DshWebLocaleBinding {
-  readonly t: (key: string, params?: Record<string, unknown>) => string
-  dispose(): void
-}
+export type DshBrowserLocaleBinding = BrowserUiLocaleBinding
 
-export interface DshWebAttachment {
-  readonly mediaType: string
-  readonly name?: string
-  readonly data: Uint8Array
-}
+export type DshBrowserAttachment = BrowserUiAttachment
 
-export interface DshWebCommandResult {
-  readonly kind: 'success' | 'error'
-  readonly text?: string
-}
+export type DshBrowserCommandResult = BrowserUiCommandResult
 
-/** Narrow DSH product services available to same-page local UI modules. */
-export interface DshWebLocalHost {
-  locale(namespace: string, dictionaries: Readonly<Record<string, Readonly<Record<string, string>>>>): DshWebLocaleBinding
-  executeCommand(sessionId: string, line: string): Promise<DshWebCommandResult | undefined>
-  readAttachment(sessionId: string, attachmentId: string): Promise<DshWebAttachment>
-}
+/** Narrow DSH product services available to same-page browser UI modules. */
+export type DshBrowserLocalHost = BrowserUiHost
 
-export interface DshWebUiFacetInput {
-  readonly manifest: ComponentManifest
-  readonly facet: string
-  readonly module: FacetModule
-}
+export type DshBrowserUiFacetInput = BrowserUiFacetInput
 
-export interface DshWebUiRuntimeFace {
-  mountFacet(input: DshWebUiFacetInput): Promise<() => Promise<void>>
-}
+export type DshBrowserUiRuntimeFace = BrowserUiFacetHost
 
 interface SlotRuntime {
   inject(name: string, setup: () => (() => void) | Iterable<() => void, void, void>): () => void
@@ -120,50 +94,80 @@ interface SlotRuntime {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    dshStdWebUi: DshWebUiRuntimeFace
+    dshStdBrowserUi: DshBrowserUiRuntimeFace
   }
 }
 
-export const name = 'dsh-standard-web-ui-adapter'
-export const inject = ['slots']
+export const name = 'dsh-standard-browser-ui-adapter'
+export const inject = ['slots', 'locale', 'remote', 'sessions']
 
-/** Install DSH Web surface owners. The package's dsh.client row loads this only in Web. */
-export function apply(ctx: ClientContext): void {
-  new DshWebUiRuntime(ctx)
+/** Install browser-realm surface owners in every shell using the DSH client module graph. */
+export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
+  const remote = ctx.remote as unknown as {
+    $mount(contribution: TypertRemoteContribution): Promise<() => Promise<void>>
+  }
+  const unmountRemote = await remote.$mount(DSH_STD_BROWSER_REMOTE)
+  const commandRemote = ctx.get('remote.dshStd') as DshStdBrowserRemote | undefined
+  if (commandRemote === undefined || typeof commandRemote.command !== 'function') {
+    await unmountRemote()
+    throw new Error('DSH browser UI adapter failed to mount its command Remote')
+  }
+  new DshBrowserUiRuntime(ctx, commandRemote)
+  return unmountRemote
 }
 
+const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
+  package: '@dsh-std/adapter-dsh',
+  descriptors: Object.freeze([Object.freeze({
+    id: '@dsh-std/adapter-dsh#dshStd/command',
+    service: 'dshStd',
+    namespace: 'dshStd',
+    method: 'command',
+    invocation: Object.freeze({ kind: 'direct' as const }),
+    parameters: Object.freeze([
+      remoteStringParameter('sessionId'),
+      remoteStringParameter('line'),
+    ]),
+    result: Object.freeze({
+      mode: 'strict' as const,
+      typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:result',
+      schema: Object.freeze({ parse: parseBrowserCommandExecution }),
+    }),
+  })]),
+})
+
 /**
- * Browser-local facet runner. It negotiates concrete Web surfaces, then gives
+ * Browser-local facet runner. It negotiates concrete browser surfaces, then gives
  * the standard facet only its scoped ContributionHost client.
  */
-export class DshWebUiRuntime extends Service implements DshWebUiRuntimeFace {
+export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeFace {
   private readonly providers: readonly UiContributionProvider[]
 
-  constructor(ctx: Context) {
-    super(ctx, 'dshStdWebUi')
+  constructor(ctx: Context, commandRemote?: DshStdBrowserRemote) {
+    super(ctx, FACET_HOST_SERVICE)
     const slots = ctx.get('slots') as unknown as SlotRuntime | undefined
-    if (slots === undefined) throw new Error('DSH Web UI adapter requires the client slot registry')
-    const host = localHost(ctx)
+    if (slots === undefined) throw new Error('DSH browser UI adapter requires the client slot registry')
+    const host = localHost(ctx, commandRemote)
     this.providers = Object.freeze([
       settingsSectionProvider(slots, host),
       toolCallViewProvider(slots, host),
     ])
   }
 
-  async mountFacet(input: DshWebUiFacetInput): Promise<() => Promise<void>> {
+  async mountFacet(input: DshBrowserUiFacetInput): Promise<() => Promise<void>> {
     const manifest = defineComponentManifest(input.manifest)
     const facet = findFacet(manifest, input.facet)
-    if (facet === undefined) throw new TypeError(`component has no Web facet ${JSON.stringify(input.facet)}`)
-    if (facet.activation?.apiVersion !== WEB_CLIENT_ACTIVATION_API_VERSION
-      || facet.activation.kind !== WEB_CLIENT_ACTIVATION_KIND) {
-      throw new TypeError(`facet ${JSON.stringify(input.facet)} is not a DSH Web client facet`)
+    if (facet === undefined) throw new TypeError(`component has no browser UI facet ${JSON.stringify(input.facet)}`)
+    if (facet.activation?.apiVersion !== BROWSER_CLIENT_ACTIVATION_API_VERSION
+      || facet.activation.kind !== BROWSER_CLIENT_ACTIVATION_KIND) {
+      throw new TypeError(`facet ${JSON.stringify(input.facet)} is not a DSH browser client facet`)
     }
-    if (typeof input.module.activate !== 'function') throw new TypeError('Web client facet module must provide activate()')
+    if (typeof input.module.activate !== 'function') throw new TypeError('Browser UI facet module must provide activate()')
 
     const requirements = facet.protocols?.requires ?? []
     for (const requirement of requirements) {
       if (!sameProtocol(requirement, { apiVersion: UI_API_VERSION, kind: CONTRIBUTION_HOST_KIND })) {
-        throw new Error(`DSH Web UI adapter cannot provide ${requirement.apiVersion} ${requirement.kind}`)
+        throw new Error(`DSH browser UI adapter cannot provide ${requirement.apiVersion} ${requirement.kind}`)
       }
     }
     const protocols = new ProtocolCatalog({ name: '@dsh-std/adapter-dsh/client', version: '0.1.0' })
@@ -176,8 +180,8 @@ export class DshWebUiRuntime extends Service implements DshWebUiRuntimeFace {
       manifests: [manifest],
       drivers: [{
         id: '@dsh-std/adapter-dsh/client',
-        apiVersion: WEB_CLIENT_ACTIVATION_API_VERSION,
-        kind: WEB_CLIENT_ACTIVATION_KIND,
+        apiVersion: BROWSER_CLIENT_ACTIVATION_API_VERSION,
+        kind: BROWSER_CLIENT_ACTIVATION_KIND,
       }],
       protocols,
       liveDeclarations: providerDeclarations,
@@ -204,7 +208,7 @@ export class DshWebUiRuntime extends Service implements DshWebUiRuntimeFace {
       apiVersion: UI_API_VERSION,
       kind: CONTRIBUTION_HOST_KIND,
     }))
-    if (negotiated?.agreement === undefined) throw new Error('Web UI facet did not negotiate ContributionHost')
+    if (negotiated?.agreement === undefined) throw new Error('Browser UI facet did not negotiate ContributionHost')
     const host = bindContributionHosts(
       validateContributionHostAgreement(negotiated.agreement),
       identity,
@@ -215,46 +219,39 @@ export class DshWebUiRuntime extends Service implements DshWebUiRuntimeFace {
     try {
       await input.module.activate(context)
     } catch (error) {
-      await closeFacet(input.module, scope, host.close, 'Web UI facet activation failed')
+      await closeFacet(input.module, scope, host.close, 'Browser UI facet activation failed')
       throw error
     }
     let active = true
     return async () => {
       if (!active) return
       active = false
-      await closeFacet(input.module, scope, host.close, 'Web UI facet unmounted')
+      await closeFacet(input.module, scope, host.close, 'Browser UI facet unmounted')
     }
   }
 }
 
-/** Wrap a standard Web UI facet as the ordinary DSH browser plugin entry. */
-export function defineDshWebUiFacet(input: DshWebUiFacetInput): {
+/** Wrap a standard browser UI facet as an ordinary DSH client plugin entry. */
+export function defineDshBrowserUiFacet(input: DshBrowserUiFacetInput): {
   readonly name: string
-  readonly inject: readonly ['dshStdWebUi']
+  readonly inject: readonly [typeof FACET_HOST_SERVICE]
   apply(ctx: ClientContext): Promise<void>
 } {
-  return Object.freeze({
-    name: `${input.manifest.metadata.name}-${input.facet}`,
-    inject: ['dshStdWebUi'] as const,
-    async apply(ctx: ClientContext): Promise<void> {
-      const dispose = await ctx.dshStdWebUi.mountFacet(input)
-      ctx.effect(() => dispose, `standard Web UI facet ${input.manifest.metadata.name}#${input.facet}`)
-    },
-  })
+  return defineBrowserUiFacet(input) as {
+    readonly name: string
+    readonly inject: readonly [typeof FACET_HOST_SERVICE]
+    apply(ctx: ClientContext): Promise<void>
+  }
 }
 
-export function webSettingsSectionRequirement(): UiSurfaceRequirement {
-  return Object.freeze({ ...WEB_SETTINGS_SECTION, mode: 'local-module' })
-}
+export const browserSettingsSectionRequirement = settingsSectionRequirement
 
-export function webToolCallViewRequirement(): UiSurfaceRequirement {
-  return Object.freeze({ ...WEB_TOOL_CALL_VIEW, mode: 'local-module' })
-}
+export const browserToolCallViewRequirement = toolCallViewRequirement
 
-function settingsSectionProvider(slots: SlotRuntime, host: DshWebLocalHost): UiContributionProvider {
+function settingsSectionProvider(slots: SlotRuntime, host: DshBrowserLocalHost): UiContributionProvider {
   const provider: UiContributionProvider = {
-    participantId: 'dsh/web/settings-section',
-    support: { surfaces: [{ ...WEB_SETTINGS_SECTION, modes: ['local-module'] as const }] },
+    participantId: 'dsh/browser/settings-section',
+    support: { surfaces: [{ ...BROWSER_SETTINGS_SECTION, modes: ['local-module'] as const }] },
     register(_owner, contribution) {
       const content = settingsContent(contribution)
       const view = localView(contribution)
@@ -276,10 +273,10 @@ function settingsSectionProvider(slots: SlotRuntime, host: DshWebLocalHost): UiC
   return Object.freeze(provider)
 }
 
-function toolCallViewProvider(slots: SlotRuntime, host: DshWebLocalHost): UiContributionProvider {
+function toolCallViewProvider(slots: SlotRuntime, host: DshBrowserLocalHost): UiContributionProvider {
   const provider: UiContributionProvider = {
-    participantId: 'dsh/web/tool-call-view',
-    support: { surfaces: [{ ...WEB_TOOL_CALL_VIEW, modes: ['local-module'] as const }] },
+    participantId: 'dsh/browser/tool-call-view',
+    support: { surfaces: [{ ...BROWSER_TOOL_CALL_VIEW, modes: ['local-module'] as const }] },
     register(_owner, contribution) {
       const content = toolViewContent(contribution)
       const view = localView(contribution)
@@ -299,78 +296,80 @@ function toolCallViewProvider(slots: SlotRuntime, host: DshWebLocalHost): UiCont
   return Object.freeze(provider)
 }
 
-function settingsContent(contribution: UiContributionRegistration): DshWebSettingsSectionContent {
-  const content = record(contribution.descriptor.content, 'Web settings section content')
-  nonEmpty(content.label, 'Web settings section content.label')
+function settingsContent(contribution: UiContributionRegistration): DshBrowserSettingsSectionContent {
+  const content = record(contribution.descriptor.content, 'Browser settings section content')
+  nonEmpty(content.label, 'Browser settings section content.label')
   if (content.order !== undefined && (!Number.isInteger(content.order) || !Number.isSafeInteger(content.order))) {
-    throw new TypeError('Web settings section content.order must be a safe integer')
+    throw new TypeError('Browser settings section content.order must be a safe integer')
   }
   return { label: content.label, ...(content.order === undefined ? {} : { order: content.order as number }) }
 }
 
-function toolViewContent(contribution: UiContributionRegistration): DshWebToolCallViewContent {
-  const content = record(contribution.descriptor.content, 'Web tool call view content')
-  nonEmpty(content.tool, 'Web tool call view content.tool')
+function toolViewContent(contribution: UiContributionRegistration): DshBrowserToolCallViewContent {
+  const content = record(contribution.descriptor.content, 'Browser tool call view content')
+  nonEmpty(content.tool, 'Browser tool call view content.tool')
   return { tool: content.tool }
 }
 
-function localView(contribution: UiContributionRegistration): DshWebLocalView {
-  const value = record(contribution.localModule, 'Web local view')
-  if (!Object.hasOwn(value, 'component')) throw new TypeError('Web local view.component is required')
-  if (value.inject !== undefined && typeof value.inject !== 'function') throw new TypeError('Web local view.inject must be a function')
-  if (value.locale !== undefined) nonEmpty(value.locale, 'Web local view.locale')
+function localView(contribution: UiContributionRegistration): DshBrowserLocalView {
+  const value = record(contribution.localModule, 'Browser local view')
+  if (!Object.hasOwn(value, 'component')) throw new TypeError('Browser local view.component is required')
+  if (value.inject !== undefined && typeof value.inject !== 'function') throw new TypeError('Browser local view.inject must be a function')
+  if (value.locale !== undefined) nonEmpty(value.locale, 'Browser local view.locale')
   if (value.label !== undefined && typeof value.label !== 'string' && typeof value.label !== 'function') {
-    throw new TypeError('Web local view.label must be a string or function')
+    throw new TypeError('Browser local view.label must be a string or function')
   }
-  if (value.setup !== undefined && typeof value.setup !== 'function') throw new TypeError('Web local view.setup must be a function')
-  if (value.dispose !== undefined && typeof value.dispose !== 'function') throw new TypeError('Web local view.dispose must be a function')
-  return value as unknown as DshWebLocalView
+  if (value.setup !== undefined && typeof value.setup !== 'function') throw new TypeError('Browser local view.setup must be a function')
+  if (value.dispose !== undefined && typeof value.dispose !== 'function') throw new TypeError('Browser local view.dispose must be a function')
+  return value as unknown as DshBrowserLocalView
 }
 
-function bindLocalView(view: DshWebLocalView, host: DshWebLocalHost): DshWebLocalViewBinding {
+function bindLocalView(view: DshBrowserLocalView, host: DshBrowserLocalHost): DshBrowserLocalViewBinding {
   const binding = view.setup?.(host) ?? view
-  if (binding.inject !== undefined && typeof binding.inject !== 'function') throw new TypeError('Web local view binding.inject must be a function')
-  if (binding.locale !== undefined) nonEmpty(binding.locale, 'Web local view binding.locale')
+  if (binding.inject !== undefined && typeof binding.inject !== 'function') throw new TypeError('Browser local view binding.inject must be a function')
+  if (binding.locale !== undefined) nonEmpty(binding.locale, 'Browser local view binding.locale')
   if (binding.label !== undefined && typeof binding.label !== 'string' && typeof binding.label !== 'function') {
-    throw new TypeError('Web local view binding.label must be a string or function')
+    throw new TypeError('Browser local view binding.label must be a string or function')
   }
-  if (binding.dispose !== undefined && typeof binding.dispose !== 'function') throw new TypeError('Web local view binding.dispose must be a function')
+  if (binding.dispose !== undefined && typeof binding.dispose !== 'function') throw new TypeError('Browser local view binding.dispose must be a function')
   return binding
 }
 
-function localHost(ctx: Context): DshWebLocalHost {
-  const get = ctx.get.bind(ctx) as (name: string) => unknown
+function localHost(ctx: Context, commandRemote?: DshStdBrowserRemote): DshBrowserLocalHost {
+  // Resolve the product services while the adapter's own fiber is active.
+  // Cordis service proxies otherwise rebind property access to the calling
+  // facet, which must not need to inject product-specific service names.
+  const product = ctx as unknown as {
+    locale: unknown
+    sessions: unknown
+  }
+  const localeService = product.locale
+  const sessionsService = product.sessions
   return Object.freeze({
-    locale(namespace: string, dictionaries: Readonly<Record<string, Readonly<Record<string, string>>>>): DshWebLocaleBinding {
+    locale(namespace: string, dictionaries: Readonly<Record<string, Readonly<Record<string, string>>>>): DshBrowserLocaleBinding {
       nonEmpty(namespace, 'locale namespace')
-      const locale = get('locale') as {
+      const locale = localeService as {
         register(namespace: string, dictionaries: Readonly<Record<string, Readonly<Record<string, string>>>>): () => void
         bind(namespace: string): (key: string, params?: Record<string, unknown>) => string
       } | undefined
       if (locale === undefined || typeof locale.register !== 'function' || typeof locale.bind !== 'function') {
-        throw new Error('DSH Web locale service is unavailable')
+        throw new Error('DSH browser locale service is unavailable')
       }
       const dispose = locale.register(namespace, dictionaries)
       return Object.freeze({ t: locale.bind(namespace), dispose })
     },
-    async executeCommand(sessionId: string, line: string): Promise<DshWebCommandResult | undefined> {
+    async executeCommand(sessionId: string, line: string): Promise<DshBrowserCommandResult | undefined> {
       nonEmpty(sessionId, 'sessionId')
       nonEmpty(line, 'command line')
-      const remoteRoot = get('remote') as { dshStd?: unknown } | undefined
-      const remote = (get('remote.dshStd') ?? remoteRoot?.dshStd) as {
-        command(sessionId: string, line: string): Promise<RemoteResult<{
-          result: DshWebCommandResult
-        } | undefined>>
-      } | undefined
-      if (remote === undefined || typeof remote.command !== 'function') throw new Error('DSH standard command Remote is unavailable')
-      const result = await remote.command(sessionId, line)
+      if (commandRemote === undefined) throw new Error('DSH standard command Remote is unavailable')
+      const result = await commandRemote.command(sessionId, line)
       if (!result.ok) throw new Error(`${result.error.message} (${result.error.code})`)
       return result.value?.result
     },
-    async readAttachment(sessionId: string, attachmentId: string): Promise<DshWebAttachment> {
+    async readAttachment(sessionId: string, attachmentId: string): Promise<DshBrowserAttachment> {
       nonEmpty(sessionId, 'sessionId')
       nonEmpty(attachmentId, 'attachmentId')
-      const sessions = get('sessions') as {
+      const sessions = sessionsService as {
         binding(id: string): { session: { readAttachment(id: string): Promise<RemoteResult<{
           attachment: { mediaType: string; name?: string }
           data: readonly number[]
@@ -393,6 +392,10 @@ type RemoteResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
+interface DshStdBrowserRemote {
+  command(sessionId: string, line: string): Promise<RemoteResult<DshBrowserCommandResultEnvelope | undefined>>
+}
+
 function activationContext(
   identity: ActivationInstanceIdentity,
   plan: CompositionPlan,
@@ -412,12 +415,12 @@ function activationContext(
         return sameProtocol(reference, negotiated) ? ui as unknown as T : undefined
       },
       implement(): () => void {
-        throw new Error('Web UI facets cannot publish protocol implementations')
+        throw new Error('Browser UI facets cannot publish protocol implementations')
       },
     }),
     extensions: Object.freeze({
       publish(): () => void {
-        throw new Error('Web UI facets cannot publish manifest extensions')
+        throw new Error('Browser UI facets cannot publish manifest extensions')
       },
     }),
   })
@@ -428,7 +431,7 @@ class BrowserCleanupScope implements CleanupScope {
   private readonly cleanups: Array<() => void | Promise<void>> = []
   get signal(): AbortSignal { return this.controller.signal }
   add(dispose: () => void | Promise<void>): () => void {
-    if (this.controller.signal.aborted) throw new Error('Web UI facet cleanup scope is closed')
+    if (this.controller.signal.aborted) throw new Error('Browser UI facet cleanup scope is closed')
     this.cleanups.push(dispose)
     return () => {
       const index = this.cleanups.indexOf(dispose)
@@ -442,7 +445,7 @@ class BrowserCleanupScope implements CleanupScope {
     for (const dispose of this.cleanups.splice(0).reverse()) {
       try { await dispose() } catch (error) { failures.push(error) }
     }
-    if (failures.length > 0) throw new AggregateError(failures, 'one or more Web UI facet cleanups failed')
+    if (failures.length > 0) throw new AggregateError(failures, 'one or more Browser UI facet cleanups failed')
   }
 }
 
@@ -456,7 +459,49 @@ async function closeFacet(
   try { await module.deactivate?.(reason) } catch (error) { failures.push(error) }
   try { await scope.close(reason) } catch (error) { failures.push(error) }
   try { await closeHost(reason) } catch (error) { failures.push(error) }
-  if (failures.length > 0) throw new AggregateError(failures, 'Web UI facet failed to close cleanly')
+  if (failures.length > 0) throw new AggregateError(failures, 'Browser UI facet failed to close cleanly')
+}
+
+function remoteStringParameter(name: string) {
+  return Object.freeze({
+    name,
+    wire: name,
+    source: 'json' as const,
+    codec: Object.freeze({
+      mode: 'strict' as const,
+      typeSymbol: `@dsh-std/adapter-dsh#dshStd/command:${name}`,
+      schema: Object.freeze({
+        parse(value: unknown): string {
+          nonEmpty(value, `dshStd.command ${name}`)
+          return value
+        },
+      }),
+    }),
+  })
+}
+
+function parseBrowserCommandExecution(value: unknown): DshBrowserCommandResultEnvelope | undefined {
+  if (value === undefined) return undefined
+  const execution = record(value, 'dshStd.command result')
+  if (execution.apiVersion !== 'commands.dsh/v1alpha1') throw new TypeError('dshStd.command result.apiVersion is invalid')
+  nonEmpty(execution.commandId, 'dshStd.command result.commandId')
+  const result = record(execution.result, 'dshStd.command result.result')
+  if (result.kind !== 'success' && result.kind !== 'error') throw new TypeError('dshStd.command result.result.kind is invalid')
+  if (result.text !== undefined && typeof result.text !== 'string') throw new TypeError('dshStd.command result.result.text must be a string')
+  if (result.kind === 'error' && (typeof result.text !== 'string' || result.text.trim() === '')) {
+    throw new TypeError('dshStd.command error result requires text')
+  }
+  if (result.sourceEventSeq !== undefined
+    && (!Number.isSafeInteger(result.sourceEventSeq) || (result.sourceEventSeq as number) < 0)) {
+    throw new TypeError('dshStd.command result.result.sourceEventSeq must be a non-negative safe integer')
+  }
+  return value as DshBrowserCommandResultEnvelope
+}
+
+interface DshBrowserCommandResultEnvelope {
+  readonly apiVersion: 'commands.dsh/v1alpha1'
+  readonly commandId: string
+  readonly result: DshBrowserCommandResult
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -467,5 +512,3 @@ function record(value: unknown, label: string): Record<string, unknown> {
 function nonEmpty(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${label} must be a non-empty string`)
 }
-
-export default apply

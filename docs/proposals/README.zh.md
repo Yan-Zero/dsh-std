@@ -46,6 +46,7 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 | `@dsh-std/session` | [Session Catalog, History and Events](session.zh.md) | 草案 |
 | `@dsh-std/presentation` | [Presentation Operations](presentation.zh.md) | 草案 |
 | `@dsh-std/ui` | [UI Facets and Contributions](ui-contribution.zh.md) | 草案 |
+| `@dsh-std/ui-browser` | [Browser-realm UI Surfaces](ui-browser.zh.md) | 草案 |
 
 领域协议独立版本化。实现其中一项不表示实现其他项。
 

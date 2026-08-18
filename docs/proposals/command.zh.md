@@ -25,6 +25,9 @@ Facet 在自身 `extensions` 中贡献一个根命令：
   metadata: { name: 'account' },
   spec: {
     title: 'Manage account',
+    placements: [
+      { apiVersion: 'x-example.tui/v1alpha1', kind: 'CommandLine' },
+    ],
     children: [
       { name: 'login', spec: { title: 'Sign in' } },
       { name: 'logout', spec: { title: 'Sign out' } },
@@ -84,7 +87,11 @@ interface CommandCatalogInput {
 
 `presentation` 描述当前客户端可执行的 presentation contract。Runtime 根据 command 所属 facet 的 requirement 计算 `missingPresentation`，并结合 composition 结果设置 `available`。
 
-Catalog 中不存在对应实际命令 handler 的 descriptor 不会成为可执行目录项。产品 adapter 负责把 manifest extension 和权威命令 registry 连接起来。
+`CommandSpec.placements` 是可选的 surface 坐标集合。它声明哪些人机命令 surface 可以发布该命令；省略时表示任意已注册的 command surface 均可发布。坐标由 surface 所有者定义，Command 协议不枚举 Web、Desktop、TUI、CLI 或其他产品类别。
+
+`CommandCatalogInput.placement` 允许 consumer 请求某个精确 surface 的目录。Runtime 必须排除显式 `placements` 不包含该坐标的命令。省略 `placement` 返回当前 context 的完整标准目录，不等同于任何默认 UI。
+
+Catalog 中不存在对应实际命令 handler 的 descriptor 不会成为可执行目录项。产品 adapter 负责把 manifest extension 和权威 handler 连接起来。命令进入某个产品命令 registry，必须由该 surface 的 provider 显式完成；profile 名称和进程入口不能代替 placement 协商。
 
 ### Execute
 
@@ -100,7 +107,7 @@ Presentation request 与 command invocation 共享 cancellation 和 deadline。C
 
 ### Protocol implementation
 
-一个产品可以提供聚合的 command protocol implementation。不同 facets 贡献具名 `Command` extension，并在产品命令系统注册 handler；目录实现只发布实际存在且当前可见的命令。
+一个产品可以提供聚合的 command protocol implementation。不同 facets 贡献具名 `Command` extension；目录实现只发布实际存在且当前可见的命令。产品中的 TUI 输入框、浏览器命令面板或桌面 command palette 可以分别注册自己的 surface provider，并只投影 placement 匹配的命令。标准执行不依赖这些人机 surface，因此设置页或远端 API 可以调用未投影到自身界面的命令。
 
 协议包可以提供类型化 client、message validator 和参考 dispatcher。跨 endpoint 使用时，command definition 生成自己的 connection agreement，并在 connection attachment 上交换这些 message。
 

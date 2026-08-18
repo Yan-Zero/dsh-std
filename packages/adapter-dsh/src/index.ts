@@ -21,6 +21,7 @@ import {
   ProtocolCatalog,
   defineProtocolDeclaration,
   sameProtocol,
+  validateApiReference,
   type ApiReference,
   type ProtocolRequirement,
   type ProtocolSupport,
@@ -454,21 +455,6 @@ function dshToolDefinition(
   }
 }
 
-interface CommandRuntime {
-  list(agent: unknown): readonly { name: string; description: string; input?: { hint: string } }[]
-  execute(agent: unknown, line: string, signal: AbortSignal): Promise<{
-    commandId: string
-    result: { kind: 'success' | 'error'; text?: string; sourceEventSeq?: number }
-  } | undefined>
-  register(definition: {
-    readonly name: string
-    readonly description: string
-    readonly input?: { readonly hint: string }
-    readonly handler: (invocation: { readonly commandId: string; readonly rawInput: string; readonly signal: AbortSignal }) =>
-      CommandExecution['result'] | Promise<CommandExecution['result']>
-  }): () => void
-}
-
 /** Product binding for standard ToolOverride declarations. */
 class DshToolOverrideRegistry {
   private readonly overrides = new Map<string, LiveToolOverride>()
@@ -741,9 +727,37 @@ class DshStandardModelAdapter extends LlmAdapter {
   }
 }
 
+export interface DshCommandSurfaceInvocation {
+  readonly commandId: string
+  readonly rawInput: string
+  readonly signal: AbortSignal
+}
+
+/** Product-owned human command surface. CommandRuntime execution does not require one. */
+export interface DshCommandSurfaceProvider {
+  readonly participantId: string
+  readonly placement: ApiReference
+  register(
+    resource: CommandResource,
+    execute: (invocation: DshCommandSurfaceInvocation) => CommandExecution['result'] | Promise<CommandExecution['result']>,
+  ): () => void
+}
+
+interface LiveStandardCommand {
+  readonly resource: CommandResource
+  readonly handler: CommandHandler
+  readonly owner: {
+    readonly participantId: string
+    readonly requirements: readonly ProtocolRequirement[]
+    capability(reference: ProtocolRequirement): CapabilityClient | undefined
+  }
+  readonly installations: Map<string, () => void>
+}
+
 /** Product binding for executable standard Command extensions. */
 class DshCommandExtensionRegistry {
-  constructor(private readonly commands: () => CommandRuntime) {}
+  private readonly entries = new Map<string, LiveStandardCommand>()
+  private readonly providers = new Map<string, DshCommandSurfaceProvider>()
 
   register(
     resource: CommandResource,
@@ -756,31 +770,99 @@ class DshCommandExtensionRegistry {
   ): () => void {
     assertCommandHandler(candidate)
     const handler = candidate as CommandHandler
-    return this.commands().register({
-      name: resource.metadata.name,
-      description: resource.spec.description ?? resource.spec.title,
-      input: { hint: 'subcommand' },
-      handler: invocation => {
-        const client = owner.requirements.filter(isPresentationProtocol)
-          .map(reference => owner.capability(reference))
-          .find(candidate => candidate !== undefined)
-        const descriptor = client === undefined
-          ? undefined
-          : boundPresentationDescriptor(owner.requirements, client)
-        let requestSequence = 0
-        const presentation: PresentationClients | undefined = descriptor === undefined || client === undefined
-          ? undefined
-          : presentationClients(descriptor, invocationClient(client, invocation.signal), {
-            invocationId: invocation.commandId,
-            origin: owner.participantId,
-            nextRequestId: () => `${invocation.commandId}:${String(++requestSequence)}`,
-          })
-        return handler.execute(
-          { rawInput: invocation.rawInput },
-          { signal: invocation.signal, ...(presentation === undefined ? {} : { presentation }) },
-        )
-      },
+    const name = resource.metadata.name
+    if (this.entries.has(name)) throw new Error(`standard command ${JSON.stringify(name)} already has a live handler`)
+    const entry = {
+      resource,
+      handler,
+      owner,
+      installations: new Map<string, () => void>(),
+    }
+    this.entries.set(name, entry)
+    try {
+      for (const [key, provider] of this.providers) this.install(key, provider, entry)
+    } catch (error) {
+      this.entries.delete(name)
+      for (const dispose of [...entry.installations.values()].reverse()) dispose()
+      throw error
+    }
+    return () => {
+      if (this.entries.get(name) !== entry) return
+      this.entries.delete(name)
+      for (const dispose of [...entry.installations.values()].reverse()) dispose()
+    }
+  }
+
+  registerProvider(provider: DshCommandSurfaceProvider): () => void {
+    nonEmpty(provider.participantId, 'command surface participantId')
+    validateApiReference(provider.placement, 'command surface placement')
+    if (typeof provider.register !== 'function') throw new TypeError('command surface provider.register must be a function')
+    const key = protocolKey(provider.placement)
+    if (this.providers.has(key)) throw new Error(`command surface ${provider.placement.apiVersion} ${provider.placement.kind} already has a provider`)
+    this.providers.set(key, provider)
+    try {
+      for (const entry of this.entries.values()) this.install(key, provider, entry)
+    } catch (error) {
+      this.providers.delete(key)
+      for (const entry of this.entries.values()) {
+        entry.installations.get(key)?.()
+        entry.installations.delete(key)
+      }
+      throw error
+    }
+    return () => {
+      if (this.providers.get(key) !== provider) return
+      this.providers.delete(key)
+      for (const entry of this.entries.values()) {
+        entry.installations.get(key)?.()
+        entry.installations.delete(key)
+      }
+    }
+  }
+
+  descriptor(name: string): { readonly name: string; readonly description: string; readonly input: { readonly hint: string } } | undefined {
+    const entry = this.entries.get(name)
+    if (entry === undefined) return undefined
+    return Object.freeze({
+      name,
+      description: entry.resource.spec.description ?? entry.resource.spec.title,
+      input: Object.freeze({ hint: 'subcommand' }),
     })
+  }
+
+  async invoke(name: string, rawInput: string, commandId: string, signal: AbortSignal): Promise<CommandExecution['result']> {
+    const entry = this.entries.get(name)
+    if (entry === undefined) throw new Error(`standard command ${JSON.stringify(name)} is unavailable`)
+    const client = entry.owner.requirements.filter(isPresentationProtocol)
+      .map(reference => entry.owner.capability(reference))
+      .find(candidate => candidate !== undefined)
+    const descriptor = client === undefined
+      ? undefined
+      : boundPresentationDescriptor(entry.owner.requirements, client)
+    let requestSequence = 0
+    const presentation: PresentationClients | undefined = descriptor === undefined || client === undefined
+      ? undefined
+      : presentationClients(descriptor, invocationClient(client, signal), {
+        invocationId: commandId,
+        origin: entry.owner.participantId,
+        nextRequestId: () => `${commandId}:${String(++requestSequence)}`,
+      })
+    return await entry.handler.execute(
+      { rawInput },
+      { signal, ...(presentation === undefined ? {} : { presentation }) },
+    )
+  }
+
+  private install(key: string, provider: DshCommandSurfaceProvider, entry: LiveStandardCommand): void {
+    if (entry.resource.spec.placements !== undefined
+      && !entry.resource.spec.placements.some(placement => sameProtocol(placement, provider.placement))) return
+    const name = entry.resource.metadata.name
+    const dispose = provider.register(
+      entry.resource,
+      invocation => this.invoke(name, invocation.rawInput, invocation.commandId, invocation.signal),
+    )
+    if (typeof dispose !== 'function') throw new TypeError('command surface provider.register must return a disposer')
+    entry.installations.set(key, dispose)
   }
 }
 
@@ -789,7 +871,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export class DshStandardAdapter extends TypertRemoteService {
-  static inject = ['agents', 'commands', 'llm']
+  static inject = ['agents', 'llm']
   static Config = z.object({
     profile: z.string(),
     profileBaseUrl: z.string(),
@@ -814,6 +896,7 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly toolOverrides: DshToolOverrideRegistry
   private readonly sessionEvents = new DshSessionEventRegistry()
   private readonly commandExtensions: DshCommandExtensionRegistry
+  private readonly commandProviderDisposers = new Set<() => void>()
   private readonly uiProviders = new Map<string, UiContributionProvider>()
   private readonly uiBindings = new Map<string, Set<BoundContributionHost>>()
   private readonly uiProviderDisposers = new Set<() => Promise<void>>()
@@ -822,7 +905,6 @@ export class DshStandardAdapter extends TypertRemoteService {
     super(ctx, 'dshStd', { namespace: DSH_STD_NAMESPACE })
     this.selfCtx = ctx
     this.toolOverrides = new DshToolOverrideRegistry(ctx, this.sessionEvents)
-    this.commandExtensions = new DshCommandExtensionRegistry(() => this.commands())
     registerToolComposition(this.compositionRules)
     const instanceId = randomUUID()
     // A Loader entry's scoped context is anchored at the package that owns the
@@ -831,6 +913,7 @@ export class DshStandardAdapter extends TypertRemoteService {
     // plugin's ctx.baseUrl discovers the adapter package instead.
     const profileBaseUrl = config.profileBaseUrl?.trim() || ctx.baseUrl
     const profile = config.profile?.trim() || profileFromBaseUrl(profileBaseUrl)
+    this.commandExtensions = new DshCommandExtensionRegistry()
     const declaration = defineProtocolDeclaration({
       participant: { id: ADAPTER_PARTICIPANT },
       supports: [commandResourceSupport, commandRuntimeSupport, modelCatalogSupport],
@@ -940,9 +1023,24 @@ export class DshStandardAdapter extends TypertRemoteService {
         await mounted.handle.deactivate('adapter disposed')
       }
       this.manifests.clear()
+      for (const dispose of [...this.commandProviderDisposers].reverse()) dispose()
       for (const dispose of [...this.uiProviderDisposers].reverse()) await dispose()
     }, '@dsh-std/adapter-dsh lifecycle')
     for (const initialize of REMOTE_INITIALIZERS) initialize.call(this)
+  }
+
+  /** Publish one product-owned human command surface. */
+  registerCommandSurfaceProvider(provider: DshCommandSurfaceProvider): () => void {
+    const unregister = this.commandExtensions.registerProvider(provider)
+    let active = true
+    const dispose = (): void => {
+      if (!active) return
+      active = false
+      this.commandProviderDisposers.delete(dispose)
+      unregister()
+    }
+    this.commandProviderDisposers.add(dispose)
+    return dispose
   }
 
   /** Publish a product-owned, same-process UI surface host to later facet activations. */
@@ -1028,7 +1126,7 @@ export class DshStandardAdapter extends TypertRemoteService {
             ...(module.snapshot === undefined ? {} : { snapshot: () => module.snapshot?.() ?? {} }),
           }))
         }
-        const disposeClient = await mountDshWebClient(this.selfCtx, packageName, packageDir)
+        const disposeClient = await mountDshBrowserClient(this.selfCtx, packageName, packageDir)
         if (disposeClient !== undefined) disposers.push(disposeClient)
       }
       return Object.freeze(disposers)
@@ -1134,23 +1232,30 @@ export class DshStandardAdapter extends TypertRemoteService {
     }
   }
 
-  catalog(sessionId: string, presentation: DshPresentationDescriptor | undefined): DshCommandCatalog {
+  catalog(
+    sessionId: string,
+    presentation: DshPresentationDescriptor | undefined,
+    placement?: ApiReference,
+  ): DshCommandCatalog {
     validatePresentation(presentation)
-    const live = this.commands().list(this.agent(sessionId))
+    this.agent(sessionId)
     const descriptors: CommandDescriptor[] = []
     for (const mounted of this.facets.values()) {
       const publication = this.publications.get(mounted.handle.identity.instanceId)
       if (publication === undefined) continue
       for (const row of publication.extensions) {
         if (!sameProtocol(row.extension, { apiVersion: COMMAND_API_VERSION, kind: COMMAND_KIND })) continue
-        const command = live.find(candidate => candidate.name === row.extension.metadata.name)
+        const resource = row.extension as CommandResource
+        if (placement !== undefined && resource.spec.placements !== undefined
+          && !resource.spec.placements.some(candidate => sameProtocol(candidate, placement))) continue
+        const command = this.commandExtensions.descriptor(resource.metadata.name)
         if (command === undefined) continue
         const unavailablePresentation = missingPresentation(mounted.facet.protocols?.requires ?? [], presentation)
         descriptors.push(Object.freeze({
           name: command.name,
           description: command.description,
           ...(command.input === undefined ? {} : { input: Object.freeze({ hint: command.input.hint }) }),
-          owner: ownerOf(mounted), resource: row.extension as CommandResource,
+          owner: ownerOf(mounted), resource,
           available: unavailablePresentation.length === 0,
           missingPresentation: unavailablePresentation,
           issues: Object.freeze([]),
@@ -1171,12 +1276,23 @@ export class DshStandardAdapter extends TypertRemoteService {
     if (facet === undefined) return undefined
     const missing = missingPresentation(facet.facet.protocols?.requires ?? [], presentation)
     if (missing.length > 0) throw new Error(`command requires unavailable presentation protocols: ${missing.map(row => `${row.apiVersion} ${row.kind}`).join(', ')}`)
-    const execution = await this.commands().execute(this.agent(sessionId), line, signal)
-    if (execution === undefined) return undefined
+    const agent = this.agent(sessionId)
+    const commandId = randomUUID()
+    const rawInput = line.slice(root.length + 1)
+    const session = (agent as DshAgentLike).session
+    session.append('command/run', { commandId, name: root, args: rawInput, source: { kind: 'user' } })
+    let result: CommandExecution['result']
+    try {
+      result = await this.commandExtensions.invoke(root, rawInput, commandId, signal)
+    } catch (error) {
+      session.append('command/done', { commandId, kind: 'error', text: errorMessage(error) })
+      throw error
+    }
+    session.append('command/done', { commandId, ...result })
     return Object.freeze({
       apiVersion: COMMAND_API_VERSION,
-      commandId: execution.commandId,
-      result: execution.result,
+      commandId,
+      result,
     })
   }
 
@@ -1344,7 +1460,7 @@ export class DshStandardAdapter extends TypertRemoteService {
   private standardImplementations(): readonly CapabilityImplementation[] {
     return Object.freeze([
       commandRuntimeImplementation(ADAPTER_PARTICIPANT, {
-        catalog: input => this.catalog(input.contextId, input.presentation),
+        catalog: input => this.catalog(input.contextId, input.presentation, input.placement),
         execute: (input, context) => this.execute(input.contextId, input.line, input.presentation, context.signal),
       }),
       modelCatalogImplementation(ADAPTER_PARTICIPANT, {
@@ -1361,7 +1477,6 @@ export class DshStandardAdapter extends TypertRemoteService {
     return agent
   }
 
-  private commands(): CommandRuntime { return this.selfCtx.get('commands') as unknown as CommandRuntime }
 }
 
 export function createDshProtocolCatalog(): ProtocolCatalog {
@@ -1544,29 +1659,44 @@ interface ProductLoader {
  * the Web profile. `clientModules` is the positive product capability check;
  * TUI and headless profiles return before inspecting client metadata or loader.
  */
-async function mountDshWebClient(
+async function mountDshBrowserClient(
   ctx: Context,
   packageName: string,
   packageDir: string,
 ): Promise<(() => Promise<void>) | undefined> {
-  const get = ctx.get.bind(ctx) as (name: string) => unknown
-  if (get('clientModules') === undefined) return undefined
-  const loader = get('loader') as Partial<ProductLoader> | undefined
-  if (loader === undefined || typeof loader.entries !== 'function'
-    || typeof loader.create !== 'function' || typeof loader.remove !== 'function') {
-    throw new Error('DSH Web client module host is active without a compatible Cordis loader')
-  }
   const packageJson = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as Record<string, unknown>
   const dsh = record(packageJson.dsh) ? packageJson.dsh : undefined
   const client = dsh !== undefined && record(dsh.client) ? dsh.client : undefined
   if (client === undefined || client.platform !== 'web') return undefined
-  if (loader.entries().some(entry => entry.options.name === packageName)) return undefined
-  const id = await loader.create({ name: packageName })
-  let active = true
+
+  const mount = async (activeCtx: Context): Promise<(() => Promise<void>) | undefined> => {
+    const get = activeCtx.get.bind(activeCtx) as (name: string) => unknown
+    const loader = get('loader') as Partial<ProductLoader> | undefined
+    if (loader === undefined || typeof loader.entries !== 'function'
+      || typeof loader.create !== 'function' || typeof loader.remove !== 'function') {
+      throw new Error('DSH Web client module host is active without a compatible Cordis loader')
+    }
+    if (loader.entries().some(entry => entry.options.name === packageName)) return undefined
+    const id = await loader.create({ name: packageName })
+    let active = true
+    return async () => {
+      if (!active) return
+      active = false
+      await loader.remove!(id)
+    }
+  }
+
+  const get = ctx.get.bind(ctx) as (name: string) => unknown
+  if (get('clientModules') !== undefined) return await mount(ctx)
+
+  // The adapter can activate before the Web client-module registry. Keep the
+  // browser half pending on that positive product capability instead of
+  // permanently deciding that the current profile is headless.
+  const fiber = ctx.inject(['clientModules'], childCtx => {
+    childCtx.effect(async () => await mount(childCtx) ?? (() => undefined), `standard Web client ${packageName}`)
+  })
   return async () => {
-    if (!active) return
-    active = false
-    await loader.remove!(id)
+    await fiber.dispose()
   }
 }
 
@@ -1599,6 +1729,10 @@ function resolveFacetModule(packageDir: string, module: string): string {
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function protocolKey(reference: ApiReference): string {
+  return `${reference.apiVersion}\0${reference.kind}`
 }
 
 function exact(value: Record<string, unknown>, allowed: readonly string[], label: string): void {

@@ -48,6 +48,7 @@ describe('@dsh-std/command', () => {
   it('describes a portable command grammar without owning its renderer', () => {
     expect(() => extensionDefinition.validateSpec({
       title: 'Manage an account',
+      placements: [{ apiVersion: 'example.ui/v1alpha1', kind: 'CommandLine' }],
       titles: { 'zh-CN': '管理账号', ja: 'アカウント管理' },
       children: [{
         name: 'login',
@@ -62,6 +63,23 @@ describe('@dsh-std/command', () => {
         },
       }],
     })).not.toThrow()
+  })
+
+  it('validates command placements independently from execution', () => {
+    const commandLine = { apiVersion: 'example.ui/v1alpha1', kind: 'CommandLine' }
+    expect(() => extensionDefinition.validateSpec({ title: 'Placed', placements: [commandLine] })).not.toThrow()
+    expect(() => extensionDefinition.validateSpec({ title: 'Broken', placements: [commandLine, commandLine] })).toThrow(/duplicate/)
+    expect(() => extensionDefinition.validateSpec({ title: 'Broken', placements: [{ apiVersion: '', kind: 'Voice' }] })).toThrow()
+
+    const invoke = vi.fn(() => ({
+      invocationId: 'invocation-2', result: Promise.resolve({ apiVersion: API_VERSION, commands: [] }),
+      progress: emptyProgress(), cancel() {},
+    }))
+    commandRuntime({ participantId: 'example.client.web', binding: () => undefined, invoke } as never)
+      .catalog({ contextId: 'session-1', placement: commandLine })
+    expect(invoke).toHaveBeenCalledWith(
+      runtimeSupport, 'catalog', { contextId: 'session-1', placement: commandLine }, undefined,
+    )
   })
 
   it('rejects ambiguous command trees before a client consumes them', () => {

@@ -9,7 +9,7 @@ const clientExternals = [
 
 export default [
   {
-    entry: { index: 'src/index.ts', 'profile-loader': 'src/profile-loader.ts', 'client-api': 'src/client.ts' },
+    entry: { index: 'src/index.ts', 'profile-loader': 'src/profile-loader.ts', 'client-api': 'src/client.ts', typert: 'src/typert.ts' },
     outDir: 'lib', format: ['esm'], fixedExtension: false, platform: 'node', target: 'node22.19',
     dts: true, sourcemap: true, clean: true,
     deps: { neverBundle: [/^@deepseek-ai\//, /^@dsh-std\//, /^node:/] },

@@ -1,9 +1,11 @@
 import type {
+  ApiReference,
   ProtocolCatalog,
   ProtocolDefinition,
   ProtocolIssue,
   ProtocolSupport,
 } from '@dsh-std/core'
+import { validateApiReference } from '@dsh-std/core'
 import type { ManifestDefinitionCatalog, ManifestExtension } from '@dsh-std/manifest'
 import type {
   CapabilityCall,
@@ -59,6 +61,8 @@ export interface CommandNodeSpec {
   readonly arguments?: readonly CommandArgumentSpec[]
   readonly options?: readonly CommandOptionSpec[]
   readonly children?: readonly CommandNode[]
+  /** Human-facing surface coordinates that may publish this command. Omitted means every command surface. */
+  readonly placements?: readonly ApiReference[]
 }
 
 export interface CommandNode {
@@ -96,6 +100,8 @@ export interface CommandCatalogInput {
   /** Opaque execution context selected by the consuming product. */
   readonly contextId: string
   readonly presentation?: PresentationDescriptor
+  /** Optional human-facing surface whose discoverable commands are requested. */
+  readonly placement?: ApiReference
 }
 
 export interface CommandExecutionInput extends CommandCatalogInput {
@@ -253,21 +259,24 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function validateCatalogInput(value: unknown): CommandCatalogInput {
   if (!record(value)) throw new TypeError('CommandRuntime.catalog input must be an object')
-  exact(value, ['contextId', 'presentation'], 'CommandRuntime.catalog input')
+  exact(value, ['contextId', 'presentation', 'placement'], 'CommandRuntime.catalog input')
   text(value.contextId, 'CommandRuntime.catalog input.contextId')
   if (value.presentation !== undefined) validatePresentationDescriptor(value.presentation)
+  if (value.placement !== undefined) validateApiReference(value.placement, 'CommandRuntime.catalog input.placement')
   return Object.freeze({
     contextId: value.contextId as string,
     ...(value.presentation === undefined ? {} : { presentation: value.presentation as PresentationDescriptor }),
+    ...(value.placement === undefined ? {} : { placement: Object.freeze({ ...(value.placement as ApiReference) }) }),
   })
 }
 
 function validateExecutionInput(value: unknown): CommandExecutionInput {
   if (!record(value)) throw new TypeError('CommandRuntime.execute input must be an object')
-  exact(value, ['contextId', 'line', 'presentation'], 'CommandRuntime.execute input')
+  exact(value, ['contextId', 'line', 'presentation', 'placement'], 'CommandRuntime.execute input')
   const catalog = validateCatalogInput({
     contextId: value.contextId,
     ...(value.presentation === undefined ? {} : { presentation: value.presentation }),
+    ...(value.placement === undefined ? {} : { placement: value.placement }),
   })
   text(value.line, 'CommandRuntime.execute input.line')
   return Object.freeze({ ...catalog, line: value.line as string })
@@ -275,9 +284,20 @@ function validateExecutionInput(value: unknown): CommandExecutionInput {
 
 function validateNodeSpec(value: unknown, label: string): void {
   if (!record(value)) throw new TypeError(`${label} must be an object`)
-  exact(value, ['title', 'titles', 'description', 'aliases', 'arguments', 'options', 'children'], label)
+  exact(value, ['title', 'titles', 'description', 'aliases', 'arguments', 'options', 'children', 'placements'], label)
   text(value.title, `${label}.title`)
   if (value.description !== undefined) text(value.description, `${label}.description`)
+  if (value.placements !== undefined) {
+    if (!Array.isArray(value.placements) || value.placements.length === 0) throw new TypeError(`${label}.placements must be a non-empty array`)
+    const seen = new Set<string>()
+    for (const [index, placement] of value.placements.entries()) {
+      validateApiReference(placement, `${label}.placements[${index}]`)
+      const reference = placement as ApiReference
+      const key = `${reference.apiVersion}\0${reference.kind}`
+      if (seen.has(key)) throw new TypeError(`${label}.placements contains a duplicate`)
+      seen.add(key)
+    }
+  }
   if (value.titles !== undefined) localized(value.titles, `${label}.titles`)
   if (value.aliases !== undefined) tokens(value.aliases, `${label}.aliases`)
   if (value.arguments !== undefined) argumentsList(value.arguments, `${label}.arguments`)

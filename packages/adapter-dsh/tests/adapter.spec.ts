@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
@@ -66,7 +66,11 @@ function presentation(kinds: readonly string[]) {
   }
 }
 
-async function fixture(declarePresentation = true): Promise<{
+async function fixture(
+  declarePresentation = true,
+  profile = 'host',
+  commandPlacements?: readonly { readonly apiVersion: string; readonly kind: string }[],
+): Promise<{
   ctx: Context
   adapter: DshStandardAdapter
   events: Array<{ type: string; data: unknown }>
@@ -157,7 +161,7 @@ async function fixture(declarePresentation = true): Promise<{
   ;(ctx.get('agents') as unknown as { list?: () => unknown[] }).list = () => [agent]
   ctx.provide('tools', tools as never)
   await ctx.plugin(CommandRuntime)
-  const adapter = new DshStandardAdapter(ctx, { profile: 'host' })
+  const adapter = new DshStandardAdapter(ctx, { profile })
   const manifest = defineComponentManifest({
     apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
     metadata: { name: 'example.acme.account', displayName: 'Account', version: '1.0.0' },
@@ -180,6 +184,7 @@ async function fixture(declarePresentation = true): Promise<{
             metadata: { name: 'account' },
             spec: {
               title: 'Manage account',
+              ...(commandPlacements === undefined ? {} : { placements: commandPlacements }),
               children: [{ name: 'login', spec: { title: 'Sign in' } }],
             },
           },
@@ -196,7 +201,11 @@ async function fixture(declarePresentation = true): Promise<{
     manifest,
     facet: 'runtime',
     activate(activation) {
-      activation.extensions.publish({ apiVersion: DSH_COMMAND_API_VERSION, kind: 'Command' }, 'account', {})
+      activation.extensions.publish(
+        { apiVersion: DSH_COMMAND_API_VERSION, kind: 'Command' },
+        'account',
+        { execute: () => ({ kind: 'success', text: 'copy the URL' }) },
+      )
       activation.extensions.publish({ apiVersion: DSH_MODEL_API_VERSION, kind: DSH_MODEL_PROVIDER_KIND }, 'example-provider', {})
     },
     snapshot: () => ({
@@ -210,10 +219,6 @@ async function fixture(declarePresentation = true): Promise<{
         },
       }],
     }),
-  })
-  ctx.commands.register({
-    name: 'account', description: 'Manage account', input: { hint: 'subcommand' },
-    handler: () => ({ kind: 'success', text: 'copy the URL' }),
   })
   return { ctx, adapter, events, agent, tools }
 }
@@ -309,6 +314,52 @@ describe('@dsh-std/adapter-dsh', () => {
     expect(created).toEqual(['web-component'])
     for (const dispose of [...disposers].reverse()) await dispose()
     expect(removed).toEqual(['entry:web-component'])
+  })
+
+  it('loads a component browser half when the Web client-module host starts later', async () => {
+    const { ctx, adapter } = await fixture()
+    const loaderEntries: Array<{ options: { name: string } }> = []
+    const created: string[] = []
+    const removed: string[] = []
+    const provide = ctx.provide.bind(ctx) as (name: string, value: unknown) => void
+    provide('loader', {
+      entries: () => loaderEntries,
+      async create(options: { name: string }) {
+        created.push(options.name)
+        loaderEntries.push({ options })
+        return `entry:${options.name}`
+      },
+      async remove(id: string) {
+        removed.push(id)
+        loaderEntries.splice(0)
+      },
+    })
+    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-late-web-profile-'))
+    temporaryRoots.push(profileDir)
+    const componentDir = join(profileDir, 'node_modules', 'late-web-component')
+    mkdirSync(componentDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+      name: 'fixture-profile', private: true, dependencies: { 'late-web-component': '1.0.0' },
+    }))
+    writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
+      name: 'late-web-component', version: '1.0.0', type: 'module',
+      exports: { '.': './index.js', './client': './client.js' },
+      dsh: { client: { platform: 'web', inject: ['@dsh-std/adapter-dsh'] } },
+    }))
+    writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
+      $schema: 'urn:example:dsh-plugin:0.15', manifestVersion: '0.15',
+      id: 'example.late.web.component', name: 'Late Web Component', version: '1.0.0',
+      facets: { host: { entry: 'standard.js', apiVersion: 'v1alpha1' } },
+      requires: { contracts: [] }, permissions: [], contributes: { commands: [] }, subscriptions: [],
+    }))
+    writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
+
+    const disposers = await adapter.mountProfileComponents(profileDir)
+    expect(created).toEqual([])
+    provide('clientModules', {})
+    await vi.waitFor(() => { expect(created).toEqual(['late-web-component']) })
+    for (const dispose of [...disposers].reverse()) await dispose()
+    await vi.waitFor(() => { expect(removed).toEqual(['entry:late-web-component']) })
   })
 
   it('loads a Community v0.15 host facet from a package-relative entry', async () => {
@@ -602,6 +653,43 @@ export default {
     await expect(adapter.command('session-1', '/account login')).resolves.toEqual(expect.objectContaining({
       result: { kind: 'success', text: 'copy the URL' },
     }))
+  })
+
+  it('projects commands only through a provider for one of their declared placements', async () => {
+    const commandLine = { apiVersion: 'example.tui/v1alpha1', kind: 'CommandLine' } as const
+    const commandPalette = { apiVersion: 'example.web/v1alpha1', kind: 'CommandPalette' } as const
+    const { adapter, ctx, agent } = await fixture(true, 'web', [commandLine])
+    const nativeAgent = agent as unknown as Parameters<typeof ctx.commands.list>[0]
+    expect(ctx.commands.list(nativeAgent))
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'account' })]))
+    expect(adapter.catalog('session-1', undefined, commandPalette).commands).toEqual([])
+    expect(adapter.catalog('session-1', undefined, commandLine).commands).toEqual([
+      expect.objectContaining({ name: 'account' }),
+    ])
+    await expect(adapter.command('session-1', '/account login')).resolves.toEqual(expect.objectContaining({
+      result: { kind: 'success', text: 'copy the URL' },
+    }))
+    const disposeProvider = adapter.registerCommandSurfaceProvider({
+      participantId: 'example.tui/command-line',
+      placement: commandLine,
+      register(resource, execute) {
+        return ctx.commands.register({
+          name: resource.metadata.name,
+          description: resource.spec.description ?? resource.spec.title,
+          input: { hint: 'subcommand' },
+          handler: async invocation => {
+            const result = await execute(invocation)
+            return result.kind === 'success'
+              ? { kind: 'success', ...(result.text === undefined ? {} : { text: result.text }), ...(result.sourceEventSeq === undefined ? {} : { sourceEventSeq: result.sourceEventSeq }) }
+              : { kind: 'error', text: result.text ?? 'command failed' }
+          },
+        })
+      },
+    })
+    expect(ctx.commands.list(nativeAgent)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'account' })]))
+    disposeProvider()
+    expect(ctx.commands.list(nativeAgent))
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'account' })]))
   })
 
   it('maps ToolOverride ownership to every live DSH agent tool view', async () => {

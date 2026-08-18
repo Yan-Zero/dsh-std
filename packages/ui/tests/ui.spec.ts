@@ -11,7 +11,7 @@ import {
 } from '../src/index.js'
 
 const SETTINGS = { apiVersion: 'tui.dsh/v1alpha1', kind: 'SettingsSection' } as const
-const TOOL_VIEW = { apiVersion: 'web.ui.dsh/v1alpha1', kind: 'ToolView' } as const
+const TOOL_VIEW = { apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'ToolView' } as const
 
 describe('@dsh-std/ui', () => {
   it('negotiates concrete surfaces and modes without standardizing their descriptors', () => {

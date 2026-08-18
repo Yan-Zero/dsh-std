@@ -10,7 +10,9 @@ This package is itself a DSH profile bundle and is activated by its `cordis.patc
 
 In a Web profile, the same package also contributes an ordinary DSH browser half through `dsh.client`. The Host discovery path seats a component's browser half only when the native `clientModules` service is live and that component declares `dsh.client.platform: "web"`. TUI and headless profiles return before reading or loading browser metadata; all Web peers are optional.
 
-The browser half owns the DSH-specific `SettingsSection` and `ToolCallView` surfaces. It waits for the corresponding native slots with `slots.inject()`, negotiates a facet-scoped `ui.dsh/v1alpha1 ContributionHost`, and retracts every slot registration when the standard Web facet unloads. Components use `defineDshWebUiFacet()` from `@dsh-std/adapter-dsh/client`; raw slot names and Cordis context do not enter portable UI code.
+The browser half implements the optional `@dsh-std/ui-browser` `SettingsSection` and `ToolCallView` surfaces. It waits for the corresponding native slots with `slots.inject()`, negotiates a facet-scoped `ui.dsh/v1alpha1 ContributionHost`, and retracts every slot registration when the standard browser-realm facet unloads. Components import the surface protocol package, never this adapter; raw DSH slot names remain inside the adapter.
+
+Commands remain executable through the standard `CommandRuntime`. A product UI publishes commands into its native command registry only after registering a provider for an exact placement coordinate. Web, Desktop, TUI, and other shells are therefore capabilities, not hard-coded profile classes.
 
 ```sh
 dsh plugin --profile web add @dsh-std/adapter-dsh
