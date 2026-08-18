@@ -8,12 +8,13 @@
 
 ## 协议
 
-`v1alpha1` 定义四个彼此独立的表现协议：
+`v1alpha1` 定义五个彼此独立的表现协议：
 
 - `OpenExternal` 请求客户端打开 HTTP 或 HTTPS URI；
 - `CopyText` 请求客户端把文本复制到剪贴板；
 - `Notification` 请求客户端显示信息、警告或错误文本；
 - `UserInteraction` 承载结构化 question、单次 approval 和 secret input。
+- `ExternalRedirect` 在用户侧接收一次 HTTP redirect，并可按调用方要求独占精确的 loopback URI。
 
 Facet 在清单中声明每项所需操作。客户端只为当前连接声明自己能够执行的协议。仅当全部必需表现协议可用时，运行时才接纳命令；运行时也只接受该 facet 事先声明的操作。操作属于当前调用，不是全局事件总线或持久客户端能力。
 

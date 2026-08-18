@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { CompositionRuleCatalog } from '@dsh-std/composition'
 import { defineComponentManifest } from '@dsh-std/manifest'
 import {
+  assertExecutableToolDefinition,
+  assertToolHandler,
   assertToolOverrideHandler,
   extensionDefinition,
   overrideCompositionRule,
@@ -27,10 +29,25 @@ describe('@dsh-std/tool', () => {
   it('defines explicit runtime handlers for tool overrides', () => {
     expect(() => overrideExtensionDefinition.validateSpec({
       target: 'read_image',
+      providers: ['openai-codex'],
       description: 'Accept remote image sources.',
     })).not.toThrow()
+    expect(() => overrideExtensionDefinition.validateSpec({
+      target: 'read_image', providers: ['openai-codex', 'openai-codex'], description: 'Duplicate.',
+    })).toThrow(/duplicates/u)
     expect(() => assertToolOverrideHandler({ resolve: (original: unknown) => original })).not.toThrow()
     expect(() => assertToolOverrideHandler({})).toThrow(/resolve/)
+  })
+
+  it('validates portable executable Tool handlers and definitions', () => {
+    const definition = {
+      name: 'imagegen', description: 'Generate an image.',
+      parameters: { type: 'object' }, output: { type: 'object' },
+      execute: async () => ({ data: {}, content: [] }),
+    }
+    expect(() => assertExecutableToolDefinition(definition)).not.toThrow()
+    expect(() => assertToolHandler({ resolve: () => definition })).not.toThrow()
+    expect(() => assertToolHandler({})).toThrow(/resolve/u)
   })
 
   it('rejects multiple override owners for the same target', () => {

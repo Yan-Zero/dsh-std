@@ -9,8 +9,16 @@ import type { PresentationInvocationScope, PresentationRequestContext, Presentat
 
 export const EXTERNAL_REDIRECT_KIND = 'ExternalRedirect'
 
-export interface ExternalRedirectRequest extends PresentationRequestContext { readonly mode: 'http-get' }
-export type ExternalRedirectInput = Omit<ExternalRedirectRequest, keyof PresentationRequestContext>
+export interface ExternalRedirectRequest extends PresentationRequestContext {
+  readonly mode: 'http-get'
+  /** Exact loopback URI required by the external provider, including an explicit port. */
+  readonly exactRedirectUri?: string
+}
+export interface ExternalRedirectInput {
+  readonly mode?: 'http-get'
+  /** The provider must bind and announce this exact URI or report the request unavailable. */
+  readonly exactRedirectUri?: string
+}
 
 export interface ExternalRedirectReady {
   readonly type: 'ready'
@@ -56,9 +64,10 @@ export const externalRedirectSupport: ProtocolSupport = Object.freeze({
 export function externalRedirectClient(client: CapabilityClient, scope: PresentationInvocationScope): ExternalRedirectClient {
   validateScope(scope)
   return Object.freeze({
-    receive(input: ExternalRedirectInput = { mode: 'http-get' }, options?: { readonly signal?: AbortSignal }) {
+    receive(input: ExternalRedirectInput = {}, options?: { readonly signal?: AbortSignal }) {
       const request = Object.freeze({
         ...input,
+        mode: input.mode ?? 'http-get',
         requestId: nextRequestId(scope), invocationId: scope.invocationId, origin: scope.origin,
         ...(scope.deadline === undefined ? {} : { deadline: scope.deadline }),
       })
@@ -91,6 +100,9 @@ export function externalRedirectImplementation(
         progress(value: ExternalRedirectReady) {
           if (announced) throw new TypeError('ExternalRedirect provider emitted more than one ready event')
           validateExternalRedirectReady(value)
+          if (input.exactRedirectUri !== undefined && value.redirectUri !== input.exactRedirectUri) {
+            throw new TypeError('ExternalRedirect provider did not announce the exact requested redirect URI')
+          }
           announced = true
           context.progress(value)
         },
@@ -105,23 +117,19 @@ export function externalRedirectImplementation(
 }
 
 export function validateExternalRedirectRequest(value: unknown): asserts value is ExternalRedirectRequest {
-  const request = exactRecord(value, ['requestId', 'invocationId', 'origin', 'deadline', 'mode'], ['requestId', 'invocationId', 'origin', 'mode'], 'ExternalRedirect request')
+  const request = exactRecord(value, ['requestId', 'invocationId', 'origin', 'deadline', 'mode', 'exactRedirectUri'], ['requestId', 'invocationId', 'origin', 'mode'], 'ExternalRedirect request')
   nonEmpty(request.requestId, 'ExternalRedirect request.requestId')
   nonEmpty(request.invocationId, 'ExternalRedirect request.invocationId')
   nonEmpty(request.origin, 'ExternalRedirect request.origin')
   if (request.mode !== 'http-get') throw new TypeError('ExternalRedirect request.mode must be "http-get"')
+  if (request.exactRedirectUri !== undefined) validateLoopbackUri(request.exactRedirectUri, 'ExternalRedirect request.exactRedirectUri', true)
   dateTime(request.deadline, 'ExternalRedirect request.deadline')
 }
 
 export function validateExternalRedirectReady(value: unknown): asserts value is ExternalRedirectReady {
   const ready = exactRecord(value, ['type', 'redirectUri', 'expiresAt'], ['type', 'redirectUri'], 'ExternalRedirect ready')
   if (ready.type !== 'ready') throw new TypeError('ExternalRedirect ready.type must be "ready"')
-  nonEmpty(ready.redirectUri, 'ExternalRedirect ready.redirectUri')
-  const uri = new URL(ready.redirectUri as string)
-  if (uri.protocol !== 'http:') throw new TypeError('ExternalRedirect ready.redirectUri must use HTTP')
-  if (uri.hostname !== '127.0.0.1' && uri.hostname !== '[::1]' && uri.hostname !== 'localhost') {
-    throw new TypeError('ExternalRedirect ready.redirectUri must target a loopback host')
-  }
+  validateLoopbackUri(ready.redirectUri, 'ExternalRedirect ready.redirectUri', false)
   dateTime(ready.expiresAt, 'ExternalRedirect ready.expiresAt')
 }
 
@@ -187,4 +195,28 @@ function nonEmpty(value: unknown, label: string): asserts value is string {
 }
 function dateTime(value: unknown, label: string): void {
   if (value !== undefined && (typeof value !== 'string' || Number.isNaN(Date.parse(value)))) throw new TypeError(`${label} must be an RFC 3339 date-time`)
+}
+
+function validateLoopbackUri(value: unknown, label: string, requireExplicitPort: boolean): asserts value is string {
+  nonEmpty(value, label)
+  let uri: URL
+  try {
+    uri = new URL(value)
+  } catch {
+    throw new TypeError(`${label} must be an absolute URI`)
+  }
+  if (uri.protocol !== 'http:') throw new TypeError(`${label} must use HTTP`)
+  if (uri.hostname !== '127.0.0.1' && uri.hostname !== '[::1]' && uri.hostname !== 'localhost') {
+    throw new TypeError(`${label} must target a loopback host`)
+  }
+  if (uri.username !== '' || uri.password !== '') throw new TypeError(`${label} must not contain user information`)
+  if (uri.hash !== '') throw new TypeError(`${label} must not contain a fragment`)
+  if (requireExplicitPort) {
+    const authority = value.slice(value.indexOf('//') + 2).split(/[/?#]/u, 1)[0]!
+    const match = /^(?:127\.0\.0\.1|localhost):(\d+)$|^\[::1\]:(\d+)$/iu.exec(authority)
+    const port = Number(match?.[1] ?? match?.[2])
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+      throw new TypeError(`${label} must include an explicit TCP port`)
+    }
+  }
 }

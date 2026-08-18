@@ -11,7 +11,7 @@
     "./interaction": { "types": "./lib/interaction.d.ts", "default": "./lib/interaction.js" },
     "./callback": { "types": "./lib/callback.d.ts", "default": "./lib/callback.js" }
   },
-  "files": ["lib"],
+  "files": ["lib", "CHANGELOG.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",

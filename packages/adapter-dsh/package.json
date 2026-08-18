@@ -14,9 +14,13 @@
       "types": "./lib/profile-loader.d.ts",
       "default": "./lib/profile-loader.js"
     },
+    "./client": {
+      "types": "./lib/client-api.d.ts",
+      "default": "./lib/client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
-  "files": ["lib", "cordis.patch.yml"],
+  "files": ["lib", "cordis.patch.yml", "CHANGELOG.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -30,7 +34,15 @@
     "@deepseek-ai/dsh-session": "*",
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/dsh-typert-protocol": "*",
+    "@deepseek-ai/dsh-client-runtime": "*",
+    "@deepseek-ai/dsh-client-ui-settings": "*",
+    "@deepseek-ai/dsh-client-ui-tool": "*",
     "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-runtime": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-settings": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-tool": { "optional": true }
   },
   "dependencies": {
     "@dsh-std/core": "workspace:*",
@@ -44,6 +56,7 @@
     "@dsh-std/session": "workspace:*",
     "@dsh-std/storage": "workspace:*",
     "@dsh-std/tool": "workspace:*",
+    "@dsh-std/ui": "workspace:*",
     "@dsh-std/presentation": "workspace:*",
     "@dsh-std/sdk": "workspace:*",
     "@dsh-std/workspace": "workspace:*"
@@ -58,11 +71,22 @@
     "@deepseek-ai/dsh-scope": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-tool": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "3.18.1"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-tool"
+      ],
+      "platform": "web"
     }
   },
   "engines": { "node": "^22.19 || >=24" }

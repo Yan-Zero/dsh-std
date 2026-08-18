@@ -6,7 +6,7 @@
 
 ## Summary
 
-`@dsh-std/tool` 定义用于发现模型工具的 `Tool` resource，以及显式接管既有工具实现的 `ToolOverride` extension。Resource 将插件的静态目录信息与 runtime 解析的可用状态、模型说明和参数 schema 分开；override 将替换意图、冲突检查和 runtime handler 归入同一个 owner 生命周期。
+`@dsh-std/tool` 定义用于发现模型工具的 `Tool` resource、供本地同进程 adapter 注册实现的 `ToolHandler`，以及显式接管既有工具实现的 `ToolOverride` extension。Resource 将插件的静态目录信息与 runtime 解析的可用状态、模型说明和参数 schema 分开；本地 handler 与 override 将实现、替换意图、冲突检查归入同一个 owner 生命周期。
 
 本提案不定义跨 endpoint 的通用工具调用协议。
 
@@ -54,6 +54,8 @@ Runtime 可以只报告工具可用，而暂不披露 schema：
 ```
 
 客户端可以用 `metadata.name` 建立稳定目录，用 status 决定是否向用户或模型显示当前 schema。
+
+Facet 与产品 adapter 在同一进程中运行时，可以随 resource 发布本地 handler。Handler 返回的定义只包含惰性 JSON Schema、执行函数与并发安全分类；adapter 把它注册到产品工具 runtime，并为每次调用注入宿主管理的执行设施。函数、`Uint8Array` 和 attachment reference 不进入 manifest、snapshot 或 endpoint 传输。
 
 组件需要包装或替换既有工具时声明 `ToolOverride`：
 
@@ -104,16 +106,26 @@ interface ToolStatus {
 
 Tool descriptor 可以出现在 facet manifest、runtime snapshot 或领域目录中。无论通过哪种载体读取，其字段语义相同。Manifest extension 只提供静态 `spec`；runtime status 必须来自实际工具目录，不能写回 manifest。
 
-以下行为不属于本协议：
+以下行为不属于 resource 的远程发现语义：
 
-- 执行工具；
+- 跨 endpoint 执行工具；
 - 流式传输工具结果；
 - 请求审批；
 - 应用 sandbox 或 policy；
 - 记录模型 tool call；
 - 渲染结果附件。
 
-这些行为需要 runtime 内部接口或独立协议。
+这些行为需要 runtime 内部接口或独立协议。本包定义的 `ToolHandler` 仅是 activation 与 adapter 之间的本地 value，不构成远程 capability。
+
+### 本地可执行定义
+
+`ToolHandler.resolve()` 返回 `ExecutableToolDefinition | undefined`。定义的 `name` 必须等于 resource name；`description`、`parameters` 与 `output` 必须是可惰性处理的 JSON Schema 数据，`execute()` 必须返回 canonical JSON data 及由宿主 attachment reference 组成的 model-facing content。`subscribe()` MAY 通知 adapter 重新求值动态定义。
+
+Adapter MUST 为每次已接受的调用创建 `ToolExecutionContext`，并保持宿主的取消信号和当前模型路由。若宿主提供图片服务，adapter MUST 投影部署生效的图片限制，并通过宿主实现完成 `validateImage`、`saveImage` 和最近会话图片读取。图片引用 MUST 保持为宿主 opaque reference；组件 MUST NOT 从中推断文件路径或 bearer URL。
+
+Workspace 读取 MUST 使用当前 session 的 cwd 与宿主 filesystem，完成读取后 MUST 发出宿主规定的 observed 记录。Workspace 写入 MUST 先经过宿主 write-intent waterfall，再应用当前 sandbox policy；本地文件写入 MUST 使用同目录临时文件和原子发布，远端文件系统则 MUST 调用其 binary writer。成功写入后 adapter MUST 发出带新 version 的 observed 记录。
+
+嵌套工具执行时，adapter MAY 暴露 `deferContent()`，并 MUST 将其转换为宿主的 deferred context，而不是直接修改父级 session。`ToolOverride` 上下文还 MUST 暴露 `delegate()`，以同一宿主 execution 调用被替换定义并保留其原生渲染结果。
 
 ### Tool override
 
@@ -123,8 +135,8 @@ interface ToolOverrideSpec {
   readonly description: string
 }
 
-interface ToolOverrideHandler<Definition = unknown> {
-  resolve(original: Definition): Definition | undefined
+interface ToolOverrideHandler {
+  resolve(original: ExecutableToolDefinition): ExecutableToolDefinition | undefined
   subscribe?(invalidate: () => void): () => void
 }
 ```
@@ -143,7 +155,7 @@ Adapter 必须对以下情况执行原子回滚：handler 缺失或形状无效�
 
 ## Drawbacks
 
-Tool resource 无法让发现它的客户端直接执行工具。客户端需要另一个执行接口，且必须维护 resource identity 与执行目标之间的映射。
+Tool resource 无法让发现它的远程客户端直接执行工具。客户端需要另一个执行接口，且必须维护 resource identity 与执行目标之间的映射。本地 `ToolHandler` 只解决 facet 与同进程 adapter 的注册，不改变这项限制。
 
 `parameters` 目前只声明为 JSON object，没有固定 schema dialect。不同消费者对关键字的支持可能不一致。
 

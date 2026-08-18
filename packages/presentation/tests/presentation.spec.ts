@@ -62,7 +62,8 @@ describe('@dsh-std/presentation', () => {
   })
 
   it('announces an exact loopback redirect URI before returning structured query values', async () => {
-    async function* progress() { yield { type: 'ready' as const, redirectUri: 'http://127.0.0.1:49152/callback/random' } }
+    const exactRedirectUri = 'http://127.0.0.1:49152/callback/random'
+    async function* progress() { yield { type: 'ready' as const, redirectUri: exactRedirectUri } }
     const invoke = vi.fn(() => ({
       invocationId: 'redirect-1',
       result: Promise.resolve({ status: 'submitted' as const, value: { query: { code: ['abc'], scope: ['one', 'two'] } } }),
@@ -71,10 +72,12 @@ describe('@dsh-std/presentation', () => {
     const client = externalRedirectClient({ participantId: 'plugin', binding: () => undefined, invoke } as never, {
       invocationId: 'command-1', origin: 'example.plugin', nextRequestId: () => 'request-redirect',
     })
-    const call = client.receive()
-    await expect(call.ready).resolves.toEqual({ type: 'ready', redirectUri: 'http://127.0.0.1:49152/callback/random' })
+    const call = client.receive({ exactRedirectUri })
+    await expect(call.ready).resolves.toEqual({ type: 'ready', redirectUri: exactRedirectUri })
     await expect(call.result).resolves.toEqual({ status: 'submitted', value: { query: { code: ['abc'], scope: ['one', 'two'] } } })
-    expect(invoke).toHaveBeenCalledWith(externalRedirectSupport, 'receive', expect.objectContaining({ requestId: 'request-redirect', mode: 'http-get' }), undefined)
+    expect(invoke).toHaveBeenCalledWith(externalRedirectSupport, 'receive', expect.objectContaining({
+      requestId: 'request-redirect', mode: 'http-get', exactRedirectUri,
+    }), undefined)
   })
 
   it('requires ExternalRedirect implementations to announce readiness before submission', async () => {
@@ -82,6 +85,44 @@ describe('@dsh-std/presentation', () => {
     await expect(implementation.handle('receive', {
       requestId: 'request-1', invocationId: 'invocation-1', origin: 'example.plugin', mode: 'http-get',
     }, { progress() {} } as never)).rejects.toThrow(/before announcing/u)
+  })
+
+  it('preserves an exact requested loopback redirect URI', async () => {
+    const progress = vi.fn()
+    const exactRedirectUri = 'http://127.0.0.1:1455/oauth/callback'
+    const implementation = externalRedirectImplementation('tui', {
+      receive: async (request, context) => {
+        expect(request.exactRedirectUri).toBe(exactRedirectUri)
+        context.progress({ type: 'ready', redirectUri: exactRedirectUri })
+        return { status: 'submitted', value: { query: { code: ['abc'] } } }
+      },
+    })
+    await expect(implementation.handle('receive', {
+      requestId: 'request-exact', invocationId: 'invocation-exact', origin: 'example.plugin',
+      mode: 'http-get', exactRedirectUri,
+    }, { progress } as never)).resolves.toMatchObject({ status: 'submitted' })
+    expect(progress).toHaveBeenCalledWith({ type: 'ready', redirectUri: exactRedirectUri })
+  })
+
+  it('rejects substitution of an exact redirect URI and permits an unavailable result', async () => {
+    const mismatched = externalRedirectImplementation('tui', {
+      receive: async (_request, context) => {
+        context.progress({ type: 'ready', redirectUri: 'http://127.0.0.1:1456/oauth/callback' })
+        return { status: 'submitted', value: { query: {} } }
+      },
+    })
+    await expect(mismatched.handle('receive', {
+      requestId: 'request-exact', invocationId: 'invocation-exact', origin: 'example.plugin',
+      mode: 'http-get', exactRedirectUri: 'http://127.0.0.1:1455/oauth/callback',
+    }, { progress() {} } as never)).rejects.toThrow(/exact requested redirect URI/u)
+
+    const occupied = externalRedirectImplementation('tui', {
+      receive: async () => ({ status: 'unavailable', reason: 'redirect-address-in-use' }),
+    })
+    await expect(occupied.handle('receive', {
+      requestId: 'request-occupied', invocationId: 'invocation-occupied', origin: 'example.plugin',
+      mode: 'http-get', exactRedirectUri: 'http://localhost:1455/oauth/callback',
+    }, { progress() {} } as never)).resolves.toEqual({ status: 'unavailable', reason: 'redirect-address-in-use' })
   })
 
   it('exposes only clients backed by both the descriptor and a live binding', () => {

@@ -6,12 +6,13 @@ Small, invocation-scoped operations that a runtime facet may request from a conn
 
 ## Contracts
 
-`v1alpha1` defines four independent presentation protocols:
+`v1alpha1` defines five independent presentation protocols:
 
 - `OpenExternal` asks the client to open an HTTP or HTTPS URI.
 - `CopyText` asks the client to copy text to its clipboard.
 - `Notification` asks the client to display informational, warning, or error text.
 - `UserInteraction` carries structured questions, one-invocation approvals, and secret input.
+- `ExternalRedirect` receives a one-shot HTTP redirect on the user side and may reserve an exact loopback URI requested by the consumer.
 
 A facet declares each required operation in its manifest. A client advertises only the protocols it can perform for the current connection. The runtime admits the command only when all required presentation protocols are available, and it accepts only operations declared by that facet. Operations belong to the active invocation; they are not a global event bus or a persistent client capability.
 

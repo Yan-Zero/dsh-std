@@ -216,6 +216,16 @@ Question、approval 和 secret input 映射到当前 DSH UI 已有的交互 stor
 
 Device code、secret input、approval token 和其他短期值只存在于 invocation scope。Adapter 不把它们写入普通 session history 或可重放 event stream。
 
+### UI mapping
+
+DSH profile 选择 client、terminal 或其他 UI facet，并装入相应 shell 与 surface owners。Profile 选择是 composition 输入；它不是 UI contribution，也不替代 surface requirement 与 agreement。
+
+DSH 原生 client module metadata 映射为对应环境的 facet activation definition。一个被选择的 client facet 可以在同一 activation instance 中向多个 DSH shell registry 注册 UI。Adapter 为每项注册保存 owner 与 disposer，并在 facet deactivate、activation rollback 或 profile composition 替换时按 lifecycle 撤销。插件内部的组件、表单字段、样式和 locale 不逐项投影为标准 contribution。
+
+DSH 的 settings section、tool result view、sidebar entry、terminal scene 等具体接缝只有在各自 surface definition 存在时才映射为 `@dsh-std/ui` surface。其 slot 名、renderer ABI、cardinality 与内容 schema 属于 DSH 生态协议或 adapter mapping，不进入基础 UI envelope。声明一个 UI facet 也不表示它取得所有 DSH UI registry 的访问权。
+
+DSH profile 可以保证某些 shell packages 存在，adapter 因而可以发布相应 surface support；support 仍必须来自当前 active owner。不存在于当前 profile 的 Web 或 terminal surface 不得形成悬空依赖，也不得阻止同一 component 的非 UI facets 激活。
+
 ### Connection mapping
 
 Connection adapter 把 DSH 的 composition、permission 和 activation scope 接入 Connection Host。标准 facet 通过 ParticipantPublicationService 发布 live declarations 和 implementation endpoint；传统 DSH 内建服务由 adapter 作为有 owner 的 participant publication 投影。只有当前 consumer scope 和已认证 peer 可见的声明进入 `EndpointConnectionView`。

@@ -10,7 +10,7 @@
     "./catalog": { "types": "./lib/catalog.d.ts", "default": "./lib/catalog.js" },
     "./sessions": { "types": "./lib/sessions.d.ts", "default": "./lib/sessions.js" }
   },
-  "files": ["lib"],
+  "files": ["lib", "CHANGELOG.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",

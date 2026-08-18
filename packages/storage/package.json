@@ -9,7 +9,7 @@
     ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
     "./schema/local-storage-0.15.json": "./schema/local-storage-0.15.schema.json"
   },
-  "files": ["lib", "schema"],
+  "files": ["lib", "schema", "CHANGELOG.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",

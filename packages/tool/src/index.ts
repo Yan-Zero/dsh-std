@@ -28,18 +28,105 @@ export interface ToolResource extends ManifestExtension<ToolSpec> {
 export interface ToolOverrideSpec {
   /** Stable name of the tool being replaced in each tool view. */
   readonly target: string
+  /** Model providers whose agent-scoped tool views receive the replacement. */
+  readonly providers?: readonly string[]
+  /** Keep the inherited schema/presentation and replace only its execution body. */
+  readonly executionOnly?: boolean
   /** Human-readable reason for the override. */
   readonly description: string
 }
 
 export type ToolOverrideResource = ManifestExtension<ToolOverrideSpec>
 
+export type ToolJsonValue = null | boolean | number | string | readonly ToolJsonValue[] | { readonly [key: string]: ToolJsonValue }
+
+export type ToolContentBlock =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly reference: unknown }
+
+export interface ToolImageData {
+  readonly data: Uint8Array
+  readonly mediaType: string
+  readonly name?: string
+}
+
+export interface StoredToolImage {
+  readonly reference: unknown
+  readonly mediaType: string
+  readonly bytes: number
+  readonly width: number
+  readonly height: number
+  readonly name?: string
+}
+
+/** Deployment-resolved image admission policy supplied by the host runtime. */
+export interface ToolImageLimits {
+  readonly maxImageBytes: number
+  readonly maxImagesPerMessage: number
+  readonly maxMessageImageBytes: number
+  readonly maxImagePixels: number
+  readonly mediaTypes: readonly string[]
+}
+
+export interface WorkspaceFileData {
+  readonly path: string
+  readonly data: Uint8Array
+  readonly name?: string
+}
+export interface WorkspaceWriteResult { readonly path: string; readonly operation: 'create' | 'update'; readonly bytes: number }
+
+/** Host-owned facilities scoped to one accepted local tool execution. */
+export interface ToolExecutionContext {
+  readonly signal: AbortSignal
+  readonly model?: { readonly provider: string; readonly model: string; readonly inputModalities?: readonly ('text' | 'image')[] }
+  /** Session-bound writer restricted by the Host to this component's declared event types. */
+  readonly session?: {
+    readonly id: string
+    appendEvent(type: string, data: ToolJsonValue): void
+  }
+  /** Host image policy. Omitted when the runtime has no image attachment service. */
+  readonly imageLimits?: ToolImageLimits
+  /** Decode and validate an image without storing it. */
+  validateImage(image: ToolImageData): Promise<void>
+  saveImage(image: ToolImageData): Promise<StoredToolImage>
+  recentImages(count: number): Promise<readonly ToolImageData[]>
+  readWorkspaceFile(path: string, maxBytes: number): Promise<WorkspaceFileData>
+  writeWorkspaceFile(path: string, data: Uint8Array): Promise<WorkspaceWriteResult>
+  /** Available for nested executions; defers model-facing content to the parent result. */
+  deferContent?(content: readonly ToolContentBlock[]): void
+  /** Available only to ToolOverride handlers; invokes the replaced definition. */
+  delegate?(input: Readonly<Record<string, ToolJsonValue>>): Promise<ToolExecutionResult>
+}
+
+/** Canonical JSON data plus the model-facing content rendered from it. */
+export interface ToolExecutionResult {
+  readonly data: ToolJsonValue
+  readonly content: readonly ToolContentBlock[]
+  /** Replayable product presentation metadata, when the replaced tool understands it. */
+  readonly presentation?: ToolJsonValue
+}
+
+/** Portable, executable definition published with a Tool or ToolOverride resource. */
+export interface ExecutableToolDefinition {
+  readonly name: string
+  readonly description: string
+  readonly parameters: Readonly<Record<string, unknown>>
+  readonly output: Readonly<Record<string, unknown>>
+  execute(input: Readonly<Record<string, ToolJsonValue>>, context: ToolExecutionContext): Promise<ToolExecutionResult>
+  isConcurrencySafe?(input: Readonly<Record<string, ToolJsonValue>>): boolean
+}
+
+export interface ToolHandler {
+  resolve(): ExecutableToolDefinition | undefined
+  subscribe?(invalidate: () => void): () => void
+}
+
 /**
  * Runtime implementation of a ToolOverride. `undefined` leaves the original
  * definition visible, which permits a live policy to disable an override.
  */
-export interface ToolOverrideHandler<Definition = unknown> {
-  resolve(original: Definition): Definition | undefined
+export interface ToolOverrideHandler {
+  resolve(original: ExecutableToolDefinition): ExecutableToolDefinition | undefined
   /** Notify the adapter when a dynamic policy may change resolve(). */
   subscribe?(invalidate: () => void): () => void
 }
@@ -72,6 +159,8 @@ export const overrideExtensionDefinition = Object.freeze({
     required: ['target', 'description'],
     properties: {
       target: { type: 'string', minLength: 1 },
+      providers: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1, uniqueItems: true },
+      executionOnly: { type: 'boolean' },
       description: { type: 'string', minLength: 1 },
     },
   }),
@@ -80,9 +169,21 @@ export const overrideExtensionDefinition = Object.freeze({
   },
   validateSpec(value: unknown): void {
     if (!record(value)) throw new TypeError('ToolOverride spec must be an object')
-    exact(value, ['target', 'description'], 'ToolOverride spec')
+    exact(value, ['target', 'providers', 'executionOnly', 'description'], 'ToolOverride spec')
     text(value.target, 'ToolOverride spec.target')
     text(value.description, 'ToolOverride spec.description')
+    if (value.providers !== undefined) {
+      if (!Array.isArray(value.providers) || value.providers.length === 0) {
+        throw new TypeError('ToolOverride spec.providers must be a non-empty array')
+      }
+      for (const provider of value.providers) text(provider, 'ToolOverride spec.providers item')
+      if (new Set(value.providers).size !== value.providers.length) {
+        throw new TypeError('ToolOverride spec.providers must not contain duplicates')
+      }
+    }
+    if (value.executionOnly !== undefined && typeof value.executionOnly !== 'boolean') {
+      throw new TypeError('ToolOverride spec.executionOnly must be boolean')
+    }
   },
 })
 
@@ -121,6 +222,27 @@ export function assertToolOverrideHandler(value: unknown): asserts value is Tool
   }
   if (value.subscribe !== undefined && typeof value.subscribe !== 'function') {
     throw new TypeError('ToolOverride handler.subscribe must be a function')
+  }
+}
+
+export function assertToolHandler(value: unknown): asserts value is ToolHandler {
+  if (!record(value) || typeof value.resolve !== 'function') {
+    throw new TypeError('Tool handler must provide resolve()')
+  }
+  if (value.subscribe !== undefined && typeof value.subscribe !== 'function') {
+    throw new TypeError('Tool handler.subscribe must be a function')
+  }
+}
+
+export function assertExecutableToolDefinition(value: unknown): asserts value is ExecutableToolDefinition {
+  if (!record(value)) throw new TypeError('executable Tool definition must be an object')
+  toolName(value.name, 'executable Tool definition.name')
+  text(value.description, 'executable Tool definition.description')
+  if (!record(value.parameters)) throw new TypeError('executable Tool definition.parameters must be an object')
+  if (!record(value.output)) throw new TypeError('executable Tool definition.output must be an object')
+  if (typeof value.execute !== 'function') throw new TypeError('executable Tool definition.execute must be a function')
+  if (value.isConcurrencySafe !== undefined && typeof value.isConcurrencySafe !== 'function') {
+    throw new TypeError('executable Tool definition.isConcurrencySafe must be a function')
   }
 }
 

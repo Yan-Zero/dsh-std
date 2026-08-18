@@ -7,7 +7,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm run build && pnpm -r test",
-    "check": "pnpm run test"
+    "check:changelogs": "node scripts/check-changelogs.mjs",
+    "check": "pnpm run check:changelogs && pnpm run test"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

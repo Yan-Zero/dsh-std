@@ -208,11 +208,12 @@ Provider 可以在 invocation 内按 deduplication key 合并尚未显示的重�
 
 ## `ExternalRedirect`
 
-`ExternalRedirect` 为 invocation 创建一次性的用户端 HTTP redirect receiver。它用于 OAuth 等必须把浏览器重定向结果送回调用方的流程；consumer 不指定监听地址、端口或路径。
+`ExternalRedirect` 为 invocation 创建一次性的用户端 HTTP redirect receiver。它用于 OAuth 等必须把浏览器重定向结果送回调用方的流程。通常由 provider 选择监听地址、端口和一次性路径；外部供应商要求固定 callback URI 时，consumer 可以要求一个精确 loopback URI。
 
 ```ts
 interface ExternalRedirectRequest extends PresentationRequestContext {
   readonly mode: 'http-get'
+  readonly exactRedirectUri?: string
 }
 
 interface ExternalRedirectReady {
@@ -233,7 +234,11 @@ interface ExternalRedirectCall {
 }
 ```
 
-Provider 必须在 receiver 已经可接受请求后，通过 progress 发送且只发送一个 `ready`。`redirectUri` 必须是指向用户端 loopback interface 的绝对 HTTP URI，并包含 Provider 生成的不可预测一次性路径。Consumer 必须使用该 URI，不得猜测 hostname、port、path 或端口转发形状。
+Provider 必须在 receiver 已经可接受请求后，通过 progress 发送且只发送一个 `ready`。`redirectUri` 必须是指向用户端 loopback interface 的绝对 HTTP URI。
+
+未指定 `exactRedirectUri` 时，Provider 选择可用端口并生成不可预测的一次性路径；Consumer 必须使用 ready 中的 URI，不得猜测 hostname、port、path 或端口转发形状。
+
+指定 `exactRedirectUri` 时，该值必须是包含显式 TCP port 的绝对 loopback HTTP URI。Provider 必须原样绑定并在 ready 中返回该 URI，不得改写 hostname、port、path、query 或字符串表示，也不得在失败时自动选择其他地址。端口已占用时返回 `unavailable`，`reason` 为 `redirect-address-in-use`；URI 被平台或 policy 拒绝时返回 `unavailable`，`reason` 为 `redirect-uri-rejected`。Provider 不得终止占用端口的进程、接管其他 listener 或把精确 URI 请求视为额外网络权限。Provider 在完成绑定前不得打开外部认证页面或发送 ready。
 
 `v1alpha1` 只定义 `http-get`。Provider 接受对 `redirectUri` 的一次 GET 请求，将 query 按参数名和全部值返回。Fragment 不会由浏览器发送，因而不属于结果。请求 body、header、cookie、任意 path 和原始 socket 不向 consumer 暴露。
 
@@ -403,7 +408,7 @@ Provider 与 Connection Host 不在同一进程时，Provider 通过标准 parti
 - request 已 settled、cancelled 或 expired；
 - presentation authority conflict；
 - field、option、URI、文本或 detail 无效；
-- redirect receiver 未就绪、已经使用或已经撤销；
+- redirect receiver 未就绪、地址已占用、精确 URI 被拒绝、已经使用或已经撤销；
 - answer 与 request schema 不匹配；
 - permission 或 policy 拒绝；
 - flow control 或并发限制超出；
@@ -420,7 +425,7 @@ Provider 与 Connection Host 不在同一进程时，Provider 通过标准 parti
 - SecretInput 从普通 question、clipboard、Session、diagnostic 和 telemetry 路径隔离。
 - URI、text、label 和 detail 都按大小与 control-character policy 校验。
 - Provider 不执行来自 consumer 的 HTML、JavaScript、ANSI control sequence、shell string 或本地模块。
-- ExternalRedirect 只监听 loopback interface，使用不可预测的一次性 path，并限制 query 大小、参数数量和等待时间。
+- ExternalRedirect 只监听 loopback interface，并限制 query 大小、参数数量和等待时间；未指定精确 URI时使用不可预测的一次性 path。
 - UI 可以隐藏未支持的 kind；不能把 unavailable 自动解释为默认同意。
 - Consumer 与 Provider 都限制并发、队列、deadline 和重复 request。
 

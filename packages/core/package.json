@@ -11,7 +11,7 @@
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib"],
+  "files": ["lib", "CHANGELOG.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -20,6 +20,8 @@ Protocol packages may ship types, validators, negotiation algorithms, state mach
 
 The code and proposals are early drafts. The target boundaries in the proposals may be ahead of the current TypeScript prototypes; existing exports are not stable until that migration is complete.
 
+Each package records protocol, type, validator, and adapter changes in its own `CHANGELOG.md`. A public contract change must update that package's changelog, which is also included in the published artifact.
+
 ## Development
 
 Node.js `^22.19 || >=24` and pnpm are required.

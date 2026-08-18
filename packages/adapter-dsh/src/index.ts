@@ -5,10 +5,15 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
-import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
-import type { ToolDefinition, ToolRuntime } from '@deepseek-ai/dsh-tools'
+import type {
+  ToolDefinition,
+  ToolExecutionResult as DshToolExecutionResult,
+  ToolRunContext,
+  ToolRuntime,
+} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
@@ -85,13 +90,24 @@ import {
 } from '@dsh-std/model'
 import {
   API_VERSION as TOOL_API_VERSION,
+  KIND as TOOL_KIND,
   OVERRIDE_KIND as TOOL_OVERRIDE_KIND,
+  assertExecutableToolDefinition,
+  assertToolHandler,
   assertToolOverrideHandler,
   extensionDefinition as toolExtensionDefinition,
   overrideExtensionDefinition as toolOverrideExtensionDefinition,
   registerComposition as registerToolComposition,
   validateToolStatus,
+  type ExecutableToolDefinition,
+  type ToolExecutionContext as StandardToolExecutionContext,
+  type ToolExecutionResult as StandardToolExecutionResult,
+  type ToolHandler,
+  type ToolContentBlock,
+  type ToolImageData,
+  type ToolJsonValue,
   type ToolOverrideHandler,
+  type ToolResource,
   type ToolOverrideResource,
 } from '@dsh-std/tool'
 import {
@@ -113,7 +129,25 @@ import {
   register as registerWorkspace,
   workspaceProviderExtensionDefinition,
 } from '@dsh-std/workspace'
+import {
+  API_VERSION as UI_API_VERSION,
+  CONTRIBUTION_HOST_KIND as UI_CONTRIBUTION_HOST_KIND,
+  bindContributionHosts,
+  contributionHostSupport,
+  register as registerUi,
+  registerManifest as registerUiManifest,
+  validateContributionHostAgreement,
+  validateContributionHostSupport,
+  type BoundContributionHost,
+  type UiContributionProvider,
+} from '@dsh-std/ui'
 import type { FacetModule } from '@dsh-std/sdk'
+import {
+  writeWorkspaceBytes,
+  type WorkspaceFileSystem,
+  type WorkspaceTarget,
+  type WorkspaceWriteIntent,
+} from './binary-fs.js'
 
 export const name = 'dsh-std-adapter'
 export const DSH_STD_NAMESPACE = 'dshStd'
@@ -129,6 +163,8 @@ export const DSH_MODEL_CATALOG_KIND = MODEL_CATALOG_KIND
 export const DSH_TOOL_API_VERSION = TOOL_API_VERSION
 export const DSH_SESSION_API_VERSION = SESSION_API_VERSION
 export const DSH_PRESENTATION_API_VERSION = PRESENTATION_API_VERSION
+export const DSH_UI_API_VERSION = UI_API_VERSION
+export const DSH_UI_CONTRIBUTION_HOST_KIND = UI_CONTRIBUTION_HOST_KIND
 const ADAPTER_COMPONENT = 'std.dsh.adapter-dsh'
 const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
 
@@ -202,7 +238,19 @@ interface ActiveEntrypoint {
 
 interface DshAgentLike {
   readonly id: string
-  readonly ctx: { readonly tools: ToolRuntime }
+  readonly ctx: {
+    readonly tools: ToolRuntime
+    on(
+      name: 'tools/execute',
+      listener: (exec: ToolRunContext, next: () => Promise<DshToolExecutionResult>) => Promise<DshToolExecutionResult>,
+    ): () => void
+  }
+  readonly options?: { readonly provider?: string; readonly model?: string }
+  readonly session: {
+    readonly id: unknown
+    requestHeader(): { readonly config?: { readonly provider?: string; readonly model?: string } } | undefined
+    append(type: string, data: unknown): void
+  }
 }
 
 interface InstalledToolOverride {
@@ -212,9 +260,198 @@ interface InstalledToolOverride {
 
 interface LiveToolOverride {
   readonly resource: ToolOverrideResource
-  readonly handler: ToolOverrideHandler<ToolDefinition>
+  readonly owner: string
+  readonly handler: ToolOverrideHandler
   readonly installed: Map<DshAgentLike, InstalledToolOverride>
   readonly unsubscribe: () => void
+}
+
+interface WorkspaceHostEvents {
+  waterfall(
+    name: 'fs/write-intent',
+    target: WorkspaceTarget,
+    exec: ToolRunContext,
+    next: () => undefined,
+  ): Promise<WorkspaceWriteIntent | undefined>
+  emit(
+    name: 'fs/observed',
+    target: WorkspaceTarget,
+    state: { readonly kind: 'present'; readonly version: unknown },
+    exec: ToolRunContext,
+  ): void
+}
+
+function standardContent(content: readonly ContentBlock[]): StandardToolExecutionResult['content'] {
+  const result: Array<{ type: 'text'; text: string } | { type: 'image'; reference: unknown }> = []
+  for (const block of content) {
+    if (block.type === 'text') result.push({ type: 'text', text: block.text })
+    else if (block.type === 'image') result.push({ type: 'image', reference: block.attachment })
+  }
+  return result
+}
+
+function dshContent(content: StandardToolExecutionResult['content']): ContentBlock[] {
+  return content.map(block => block.type === 'text'
+    ? { type: 'text', text: block.text }
+    : { type: 'image', attachment: block.reference as never })
+}
+
+function collectImageReferences(value: unknown, output: unknown[]): void {
+  if (!record(value)) return
+  if (value.type === 'image' && value.attachment !== undefined) output.push(value.attachment)
+  if (Array.isArray(value.content)) for (const block of value.content) collectImageReferences(block, output)
+}
+
+async function modelForTool(ctx: Context, exec: ToolRunContext): Promise<StandardToolExecutionContext['model']> {
+  const configured = exec.agent?.session.requestHeader()?.config
+  const provider = configured?.provider ?? exec.agent?.options.provider
+  const model = configured?.model ?? exec.agent?.options.model
+  if (provider === undefined || model === undefined) return undefined
+  const llm = ctx.get('llm') as { resolveModelInfo(provider: string, model: string, signal: AbortSignal): Promise<{ inputModalities?: readonly ('text' | 'image')[] }> } | undefined
+  const info = await llm?.resolveModelInfo(provider, model, exec.signal)
+  return { provider, model, ...(info?.inputModalities === undefined ? {} : { inputModalities: info.inputModalities }) }
+}
+
+async function standardToolContext(
+  ctx: Context,
+  exec: ToolRunContext,
+  owner: string,
+  sessionEvents: DshSessionEventRegistry,
+  original?: ToolDefinition,
+): Promise<StandardToolExecutionContext> {
+  const attachments = ctx.get('attachments') as AttachmentStore | undefined
+  const fs = ctx.get('fs') as unknown as WorkspaceFileSystem | undefined
+  const hostEvents = ctx as unknown as WorkspaceHostEvents
+  const cwd = exec.agent?.session.header.cwd
+  return Object.freeze({
+    signal: exec.signal,
+    ...await modelForTool(ctx, exec).then(model => model === undefined ? {} : { model }),
+    ...(exec.agent === undefined ? {} : {
+      session: Object.freeze({
+        id: String(exec.agent.session.id),
+        appendEvent(type: string, data: ToolJsonValue) {
+          sessionEvents.append(owner, exec.agent!.session, type, data)
+        },
+      }),
+    }),
+    ...(attachments === undefined ? {} : { imageLimits: attachments.imageLimits }),
+    async validateImage(image: ToolImageData) {
+      if (attachments === undefined) throw new Error('the Runtime does not provide image attachment validation')
+      await attachments.validateImage({
+        data: image.data, mediaType: image.mediaType as never,
+        ...(image.name === undefined ? {} : { name: image.name }),
+      })
+    },
+    async saveImage(image: ToolImageData) {
+      if (attachments === undefined) throw new Error('the Runtime does not provide image attachment storage')
+      const reference = await attachments.saveImage({
+        data: image.data, mediaType: image.mediaType as never,
+        ...(image.name === undefined ? {} : { name: image.name }),
+      })
+      return {
+        reference, mediaType: reference.mediaType, bytes: reference.bytes,
+        width: reference.width, height: reference.height,
+        ...(reference.name === undefined ? {} : { name: reference.name }),
+      }
+    },
+    async recentImages(count: number) {
+      if (attachments === undefined) throw new Error('the Runtime does not provide image attachment storage')
+      const messages = exec.agent?.session.deriveMessages() ?? []
+      const references: unknown[] = []
+      for (const message of messages) collectImageReferences(message, references)
+      const selected = references.slice(-count)
+      if (selected.length !== count) throw new Error(`requested ${count} recent images, but only ${selected.length} are available`)
+      return await Promise.all(selected.map(async reference => {
+        const stored = await attachments.readImage(reference as never, exec.signal)
+        return {
+          data: stored.data, mediaType: stored.ref.mediaType,
+          ...(stored.ref.name === undefined ? {} : { name: stored.ref.name }),
+        }
+      }))
+    },
+    async readWorkspaceFile(path: string, maxBytes: number) {
+      if (fs === undefined) throw new Error('the Runtime does not provide workspace file access')
+      const target = await fs.resolve(path, { ...(cwd === undefined ? {} : { cwd }), signal: exec.signal })
+      const info = await fs.stat(target, exec.signal)
+      if (info === undefined) throw new Error(`workspace file does not exist: ${path}`)
+      if (info.type !== 'file') throw new Error(`workspace path is not a regular file: ${path}`)
+      const data = await fs.readBytes(target, exec.signal, maxBytes)
+      hostEvents.emit('fs/observed', target, { kind: 'present', version: info.version }, exec)
+      return { path: target.displayPath, data, name: basename(target.displayPath) }
+    },
+    async writeWorkspaceFile(path: string, data: Uint8Array) {
+      if (fs === undefined) throw new Error('the Runtime does not provide workspace file access')
+      const target = await fs.resolve(path, { ...(cwd === undefined ? {} : { cwd }), signal: exec.signal })
+      const expected = await hostEvents.waterfall('fs/write-intent', target, exec, () => undefined)
+      const outcome = await writeWorkspaceBytes(ctx, exec, fs, target, data, expected)
+      hostEvents.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
+      return { path: target.displayPath, operation: outcome.operation, bytes: outcome.bytes }
+    },
+    ...(exec.parent === undefined ? {} : {
+      deferContent(content: readonly ToolContentBlock[]) {
+        exec.deferContext(createUserMessage({
+          content: dshContent(content),
+          source: { kind: 'plugin', plugin: owner },
+        }))
+      },
+    }),
+    ...(original === undefined ? {} : {
+      async delegate(input: Readonly<Record<string, ToolJsonValue>>) {
+        const data = await original.execute(input, exec) as ToolJsonValue
+        return { data, content: standardContent(original.output.render(input, data as never)) }
+      },
+    }),
+  })
+}
+
+function portableDefinition(original: ToolDefinition): ExecutableToolDefinition {
+  return {
+    name: original.name,
+    description: original.description,
+    parameters: original.parameters as Readonly<Record<string, unknown>>,
+    output: original.output.schema as Readonly<Record<string, unknown>>,
+    execute: async (_input, context) => {
+      if (context.delegate === undefined) throw new Error('the original Tool definition cannot execute outside an override')
+      return context.delegate(_input)
+    },
+    ...(original.isConcurrencySafe === undefined ? {} : { isConcurrencySafe: input => original.isConcurrencySafe!(input) }),
+  }
+}
+
+function dshToolDefinition(
+  ctx: Context,
+  definition: ExecutableToolDefinition,
+  owner: string,
+  sessionEvents: DshSessionEventRegistry,
+  original?: ToolDefinition,
+): ToolDefinition {
+  assertExecutableToolDefinition(definition)
+  return {
+    name: definition.name,
+    description: definition.description,
+    parameters: definition.parameters as never,
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['data', 'content'],
+        properties: { data: definition.output, content: { type: 'array' }, presentation: {} },
+      } as never,
+      render: (_input, value) => dshContent((value as unknown as StandardToolExecutionResult).content),
+      ...(original?.output.presentationMeta === undefined ? {} : {
+        presentationMeta: (_input: unknown, value: unknown) =>
+          ((value as StandardToolExecutionResult).presentation ?? null) as never,
+      }),
+    },
+    async execute(input, exec) {
+      return await definition.execute(
+        input as Readonly<Record<string, ToolJsonValue>>,
+        await standardToolContext(ctx, exec, owner, sessionEvents, original),
+      )
+    },
+    ...(original?.presentCall === undefined ? {} : { presentCall: original.presentCall }),
+    ...(original?.presentResult === undefined ? {} : { presentResult: original.presentResult }),
+    ...(original?.timeoutMs === undefined ? {} : { timeoutMs: original.timeoutMs }),
+    ...(definition.isConcurrencySafe === undefined ? {} : { isConcurrencySafe: input => definition.isConcurrencySafe!(input as Readonly<Record<string, ToolJsonValue>>) }),
+  }
 }
 
 interface CommandRuntime {
@@ -237,19 +474,23 @@ class DshToolOverrideRegistry {
   private readonly overrides = new Map<string, LiveToolOverride>()
   private syncing = false
 
-  constructor(private readonly ctx: Context) {
+  constructor(
+    private readonly ctx: Context,
+    private readonly sessionEvents: DshSessionEventRegistry,
+  ) {
     ctx.on('agent/created', ({ agent }) => { this.syncAgent(agent as DshAgentLike) })
     ctx.on('agent/disposed', ({ agent }) => { this.forgetAgent(agent as DshAgentLike) })
     ctx.on('tools/change', () => { this.syncAll() })
   }
 
-  register(resource: ToolOverrideResource, candidate: unknown): () => void {
+  register(resource: ToolOverrideResource, candidate: unknown, owner: string): () => void {
     assertToolOverrideHandler(candidate)
-    const handler = candidate as ToolOverrideHandler<ToolDefinition>
+    const handler = candidate as ToolOverrideHandler
     const target = resource.spec.target
     if (this.overrides.has(target)) throw new Error(`tool ${JSON.stringify(target)} already has a live ToolOverride`)
     const live: LiveToolOverride = {
       resource,
+      owner,
       handler,
       installed: new Map(),
       unsubscribe: handler.subscribe?.(() => { this.syncAll() }) ?? (() => undefined),
@@ -292,20 +533,51 @@ class DshToolOverrideRegistry {
     for (const override of this.overrides.values()) {
       const target = override.resource.spec.target
       const current = override.installed.get(agent)
-      const original = tools.get(target)
+      const providers = override.resource.spec.providers
+      const provider = agent.session.requestHeader()?.config?.provider ?? agent.options?.provider
+      if (providers !== undefined && (provider === undefined || !providers.includes(provider))) {
+        if (current !== undefined) this.remove(override, agent)
+        continue
+      }
+      const original = override.resource.spec.executionOnly === true
+        ? tools.get(target, agent as never)
+        : tools.get(target)
       if (original === undefined) {
         if (current !== undefined) this.remove(override, agent)
         continue
       }
       if (current?.original === original) continue
       if (current !== undefined) this.remove(override, agent)
-      if (tools.get(target, agent as never) !== original) continue
-      const replacement = override.handler.resolve(original)
+      if (override.resource.spec.executionOnly !== true && tools.get(target, agent as never) !== original) continue
+      const portable = portableDefinition(original)
+      const replacement = override.handler.resolve(portable)
       if (replacement === undefined) continue
       if (replacement.name !== target) {
         throw new TypeError(`ToolOverride for ${JSON.stringify(target)} returned tool ${JSON.stringify(replacement.name)}`)
       }
-      const dispose = agent.ctx.tools.register(replacement)
+      let dispose: () => void
+      if (override.resource.spec.executionOnly === true) {
+        if (replacement.parameters !== portable.parameters || replacement.output !== portable.output) {
+          throw new TypeError(`execution-only ToolOverride for ${JSON.stringify(target)} changed its schema`)
+        }
+        dispose = agent.ctx.on('tools/execute', async (exec, next) => {
+          if (exec.name !== target) return await next()
+          const result = await replacement.execute(
+            exec.arguments as Readonly<Record<string, ToolJsonValue>>,
+            await standardToolContext(this.ctx, exec, override.owner, this.sessionEvents, original),
+          )
+          return {
+            isError: false,
+            value: result.data as never,
+            content: dshContent(result.content),
+            ...(result.presentation === undefined ? {} : { meta: result.presentation as never }),
+          }
+        })
+      } else {
+        dispose = agent.ctx.tools.register(dshToolDefinition(
+          this.ctx, replacement, override.owner, this.sessionEvents, original,
+        ))
+      }
       override.installed.set(agent, { original, dispose })
     }
   }
@@ -328,8 +600,8 @@ class DshToolOverrideRegistry {
 
 /** Product binding for component-owned durable session event vocabularies. */
 class DshSessionEventRegistry {
-  private readonly baseline = new Set(KNOWN_SESSION_EVENT_TYPES)
   private readonly owned = new Map<string, number>()
+  private readonly writers = new Map<string, Map<string, number>>()
   private readonly vocabulary: Set<string>
 
   constructor() {
@@ -339,9 +611,12 @@ class DshSessionEventRegistry {
     this.vocabulary = KNOWN_SESSION_EVENT_TYPES as Set<string>
   }
 
-  register(type: string): () => void {
+  register(type: string, owner: string): () => void {
     const count = this.owned.get(type) ?? 0
     this.owned.set(type, count + 1)
+    const types = this.writers.get(owner) ?? new Map<string, number>()
+    types.set(type, (types.get(type) ?? 0) + 1)
+    this.writers.set(owner, types)
     this.vocabulary.add(type)
     let active = true
     return () => {
@@ -349,11 +624,30 @@ class DshSessionEventRegistry {
       active = false
       const next = (this.owned.get(type) ?? 1) - 1
       if (next > 0) this.owned.set(type, next)
+      else this.owned.delete(type)
+      const writerTypes = this.writers.get(owner)
+      const writerNext = (writerTypes?.get(type) ?? 1) - 1
+      if (writerNext > 0) writerTypes?.set(type, writerNext)
       else {
-        this.owned.delete(type)
-        if (!this.baseline.has(type)) this.vocabulary.delete(type)
+        writerTypes?.delete(type)
+        if (writerTypes?.size === 0) this.writers.delete(owner)
       }
+      // Durable history can outlive the facet activation that wrote it. Keep
+      // every observed event type recognizable for the rest of this process,
+      // including across hot reload and activation rollback.
     }
+  }
+
+  append(
+    owner: string,
+    session: unknown,
+    type: string,
+    data: ToolJsonValue,
+  ): void {
+    if (!this.writers.get(owner)?.has(type)) {
+      throw new Error(`component ${JSON.stringify(owner)} did not declare session event ${JSON.stringify(type)}`)
+    }
+    ;(session as { append(type: string, data: never): unknown }).append(type, data as never)
   }
 }
 
@@ -520,11 +814,14 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly toolOverrides: DshToolOverrideRegistry
   private readonly sessionEvents = new DshSessionEventRegistry()
   private readonly commandExtensions: DshCommandExtensionRegistry
+  private readonly uiProviders = new Map<string, UiContributionProvider>()
+  private readonly uiBindings = new Map<string, Set<BoundContributionHost>>()
+  private readonly uiProviderDisposers = new Set<() => Promise<void>>()
 
   constructor(ctx: Context, config: AdapterConfig) {
     super(ctx, 'dshStd', { namespace: DSH_STD_NAMESPACE })
     this.selfCtx = ctx
-    this.toolOverrides = new DshToolOverrideRegistry(ctx)
+    this.toolOverrides = new DshToolOverrideRegistry(ctx, this.sessionEvents)
     this.commandExtensions = new DshCommandExtensionRegistry(() => this.commands())
     registerToolComposition(this.compositionRules)
     const instanceId = randomUUID()
@@ -556,7 +853,7 @@ export class DshStandardAdapter extends TypertRemoteService {
       extensions: Object.freeze([]),
     })
     this.lifecycle = new LifecycleCoordinator(this.protocols, this.drivers, this.publications, {
-      open: ({ identity, declaration: consumerDeclaration }) => {
+      open: ({ identity, declaration: consumerDeclaration, agreements }) => {
         const consumerEndpoint = new StandardEndpointRuntime({
           id: `${this.runtime.id}.activation`,
           instanceId: `${this.runtime.instanceId}:activation:${identity.instanceId}`,
@@ -575,11 +872,42 @@ export class DshStandardAdapter extends TypertRemoteService {
             .join('; '))
         }
         const capability = pair.left.client(identity.participantId)
+        const uiProviders = this.uiProviders
+        const uiBindings = this.uiBindings
+        let ui: BoundContributionHost | undefined
         return Object.freeze({
           client<T = unknown>(reference: ApiReference): T | undefined {
+            if (sameProtocol(reference, { apiVersion: UI_API_VERSION, kind: UI_CONTRIBUTION_HOST_KIND })) {
+              if (ui !== undefined) return ui.client as unknown as T
+              const negotiated = agreements.find(row => sameProtocol(row, reference))
+              if (negotiated?.agreement === undefined) return undefined
+              const agreement = validateContributionHostAgreement(negotiated.agreement)
+              const selected = agreement.surfaces.filter(row => row.consumer === identity.participantId)
+              if (selected.length === 0) return undefined
+              const providers = [...new Set(selected.map(row => row.provider))].map(participantId => {
+                const provider = uiProviders.get(participantId)
+                if (provider === undefined) throw new Error(`negotiated UI provider ${JSON.stringify(participantId)} is unavailable`)
+                return provider
+              })
+              ui = bindContributionHosts(agreement, identity, providers)
+              for (const provider of providers) {
+                const bindings = uiBindings.get(provider.participantId) ?? new Set<BoundContributionHost>()
+                bindings.add(ui)
+                uiBindings.set(provider.participantId, bindings)
+              }
+              return ui.client as unknown as T
+            }
             return capability.binding(reference) === undefined ? undefined : capability as unknown as T
           },
-          close: (reason?: string) => pair.close(reason),
+          close: async (reason?: string) => {
+            let failure: unknown
+            try { await ui?.close(reason) } catch (error) { failure = error }
+            if (ui !== undefined) {
+              for (const bindings of uiBindings.values()) bindings.delete(ui)
+            }
+            pair.close(reason)
+            if (failure !== undefined) throw failure
+          },
         })
       },
     })
@@ -612,8 +940,61 @@ export class DshStandardAdapter extends TypertRemoteService {
         await mounted.handle.deactivate('adapter disposed')
       }
       this.manifests.clear()
+      for (const dispose of [...this.uiProviderDisposers].reverse()) await dispose()
     }, '@dsh-std/adapter-dsh lifecycle')
     for (const initialize of REMOTE_INITIALIZERS) initialize.call(this)
+  }
+
+  /** Publish a product-owned, same-process UI surface host to later facet activations. */
+  registerUiContributionProvider(provider: UiContributionProvider): () => Promise<void> {
+    nonEmpty(provider.participantId, 'UI contribution provider participantId')
+    if (this.uiProviders.has(provider.participantId)) {
+      throw new Error(`UI contribution provider ${JSON.stringify(provider.participantId)} is already registered`)
+    }
+    const support = contributionHostSupport(validateContributionHostSupport(provider.support))
+    const declaration = defineProtocolDeclaration({
+      participant: { id: provider.participantId },
+      supports: [support],
+    })
+    const instanceId = `${this.runtime.instanceId}:ui:${randomUUID()}`
+    const unregisterEndpoint = this.connectionEndpoint.register({ declaration })
+    let unpublish: () => void
+    try {
+      unpublish = this.publications.publish({
+        identity: Object.freeze({
+          component: ADAPTER_COMPONENT,
+          version: '0.1.0',
+          facet: 'ui-surface-host',
+          instanceId,
+          participantId: provider.participantId,
+        }),
+        declaration,
+        protocols: Object.freeze([]),
+        extensions: Object.freeze([]),
+      })
+    } catch (error) {
+      unregisterEndpoint()
+      throw error
+    }
+    this.uiProviders.set(provider.participantId, provider)
+    let active = true
+    const dispose = async (): Promise<void> => {
+      if (!active) return
+      active = false
+      this.uiProviderDisposers.delete(dispose)
+      if (this.uiProviders.get(provider.participantId) === provider) this.uiProviders.delete(provider.participantId)
+      unpublish()
+      unregisterEndpoint()
+      const bindings = [...(this.uiBindings.get(provider.participantId) ?? [])]
+      this.uiBindings.delete(provider.participantId)
+      const errors: unknown[] = []
+      for (const binding of bindings.reverse()) {
+        try { await binding.close('UI contribution provider unregistered') } catch (error) { errors.push(error) }
+      }
+      if (errors.length > 0) throw new AggregateError(errors, 'one or more UI bindings failed to close')
+    }
+    this.uiProviderDisposers.add(dispose)
+    return dispose
   }
 
   /** Discover and activate every portable FacetModule installed in one profile. */
@@ -647,6 +1028,8 @@ export class DshStandardAdapter extends TypertRemoteService {
             ...(module.snapshot === undefined ? {} : { snapshot: () => module.snapshot?.() ?? {} }),
           }))
         }
+        const disposeClient = await mountDshWebClient(this.selfCtx, packageName, packageDir)
+        if (disposeClient !== undefined) disposers.push(disposeClient)
       }
       return Object.freeze(disposers)
     } catch (error) {
@@ -797,6 +1180,11 @@ export class DshStandardAdapter extends TypertRemoteService {
     })
   }
 
+  /** Browser-safe command entry: no product-specific route and no implicit Presentation claim. */
+  async command(sessionId: string, line: string): Promise<DshCommandExecution | undefined> {
+    return await this.execute(sessionId, line, undefined, new AbortController().signal)
+  }
+
   private commandOwner(name: string): MountedFacet | undefined {
     for (const mounted of this.facets.values()) {
       const publication = this.publications.get(mounted.handle.identity.instanceId)
@@ -849,16 +1237,46 @@ export class DshStandardAdapter extends TypertRemoteService {
             disposers.push(() => { void fiber.dispose() })
           }
         }
+        if (sameProtocol(extension, { apiVersion: TOOL_API_VERSION, kind: TOOL_KIND })) {
+          const published = publication.extensions.find(row => row.extension === extension
+            || (sameProtocol(row.extension, extension) && row.extension.metadata.name === extension.metadata.name))
+          if (published === undefined) throw new Error(`Tool ${JSON.stringify(extension.metadata.name)} did not publish a runtime handler`)
+          assertToolHandler(published.handler)
+          const handler = published.handler as ToolHandler
+          const tools = this.selfCtx.get('tools') as ToolRuntime | undefined
+          if (tools === undefined) throw new Error('Tool resource requires the DSH tools service')
+          let unregister = (): void => undefined
+          const sync = (): void => {
+            const definition = handler.resolve()
+            if (definition !== undefined) {
+              assertExecutableToolDefinition(definition)
+              if (definition.name !== extension.metadata.name) {
+                throw new TypeError(`Tool handler for ${JSON.stringify(extension.metadata.name)} returned ${JSON.stringify(definition.name)}`)
+              }
+            }
+            unregister()
+            unregister = definition === undefined
+              ? () => undefined
+              : tools.register(dshToolDefinition(
+                  this.selfCtx, definition, publication.identity.component, this.sessionEvents,
+                ))
+          }
+          sync()
+          const unsubscribe = handler.subscribe?.(sync) ?? (() => undefined)
+          disposers.push(() => { unsubscribe(); unregister() })
+        }
         if (sameProtocol(extension, { apiVersion: TOOL_API_VERSION, kind: TOOL_OVERRIDE_KIND })) {
           const published = publication.extensions.find(row => row.extension === extension
             || (sameProtocol(row.extension, extension) && row.extension.metadata.name === extension.metadata.name))
           if (published === undefined) {
             throw new Error(`ToolOverride ${JSON.stringify(extension.metadata.name)} did not publish a runtime handler`)
           }
-          disposers.push(this.toolOverrides.register(extension as ToolOverrideResource, published.handler))
+          disposers.push(this.toolOverrides.register(
+            extension as ToolOverrideResource, published.handler, publication.identity.component,
+          ))
         }
         if (sameProtocol(extension, { apiVersion: SESSION_API_VERSION, kind: SESSION_EVENT_KIND })) {
-          disposers.push(this.sessionEvents.register(extension.metadata.name))
+          disposers.push(this.sessionEvents.register(extension.metadata.name, publication.identity.component))
         }
       }
     } catch (error) {
@@ -954,6 +1372,7 @@ export function createDshProtocolCatalog(): ProtocolCatalog {
   registerPresentation(catalog)
   registerStorage(catalog)
   registerWorkspace(catalog)
+  registerUi(catalog)
   return catalog
 }
 
@@ -966,11 +1385,12 @@ export function createDshManifestCatalog(): ManifestDefinitionCatalog {
   catalog.registerExtension(toolOverrideExtensionDefinition)
   catalog.registerExtension(sessionEventExtensionDefinition)
   catalog.registerExtension(workspaceProviderExtensionDefinition)
+  registerUiManifest(catalog)
   return catalog
 }
 
 const REMOTE_INITIALIZERS: Array<(this: DshStandardAdapter) => void> = []
-for (const method of ['describe', 'snapshot', 'catalog', 'execute'] as const) {
+for (const method of ['describe', 'snapshot', 'catalog', 'execute', 'command'] as const) {
   const implementation = DshStandardAdapter.prototype[method]
   const applyRemote = Remote as unknown as (
     value: (...args: never[]) => unknown,
@@ -1107,6 +1527,47 @@ function packageDirectory(anchor: string, packageName: string): string | undefin
     if (existsSync(join(candidate, 'package.json'))) return candidate
   }
   return undefined
+}
+
+interface ProductLoaderEntry {
+  readonly options: { readonly name?: string }
+}
+
+interface ProductLoader {
+  entries(): readonly ProductLoaderEntry[]
+  create(options: { readonly name: string }): Promise<string>
+  remove(id: string): Promise<void>
+}
+
+/**
+ * Seat a standard component's ordinary DSH browser half only when this Host is
+ * the Web profile. `clientModules` is the positive product capability check;
+ * TUI and headless profiles return before inspecting client metadata or loader.
+ */
+async function mountDshWebClient(
+  ctx: Context,
+  packageName: string,
+  packageDir: string,
+): Promise<(() => Promise<void>) | undefined> {
+  const get = ctx.get.bind(ctx) as (name: string) => unknown
+  if (get('clientModules') === undefined) return undefined
+  const loader = get('loader') as Partial<ProductLoader> | undefined
+  if (loader === undefined || typeof loader.entries !== 'function'
+    || typeof loader.create !== 'function' || typeof loader.remove !== 'function') {
+    throw new Error('DSH Web client module host is active without a compatible Cordis loader')
+  }
+  const packageJson = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as Record<string, unknown>
+  const dsh = record(packageJson.dsh) ? packageJson.dsh : undefined
+  const client = dsh !== undefined && record(dsh.client) ? dsh.client : undefined
+  if (client === undefined || client.platform !== 'web') return undefined
+  if (loader.entries().some(entry => entry.options.name === packageName)) return undefined
+  const id = await loader.create({ name: packageName })
+  let active = true
+  return async () => {
+    if (!active) return
+    active = false
+    await loader.remove!(id)
+  }
 }
 
 function assertFacetModule(value: unknown, module: string): asserts value is FacetModule {
