@@ -27,52 +27,52 @@ importers:
   packages/adapter-dsh:
     dependencies:
       '@dsh-std/command':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../command
       '@dsh-std/composition':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../composition
       '@dsh-std/connection':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../connection
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/lifecycle':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../lifecycle
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
       '@dsh-std/messages':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../messages
       '@dsh-std/model':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../model
       '@dsh-std/presentation':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../presentation
       '@dsh-std/sdk':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../sdk
       '@dsh-std/session':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../session
       '@dsh-std/storage':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../storage
       '@dsh-std/tool':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../tool
       '@dsh-std/ui':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../ui
       '@dsh-std/ui-browser':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../ui-browser
       '@dsh-std/workspace':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../workspace
       zod:
         specifier: ^4.4.3
@@ -121,31 +121,31 @@ importers:
   packages/command:
     dependencies:
       '@dsh-std/connection':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../connection
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
       '@dsh-std/presentation':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../presentation
 
   packages/composition:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
 
   packages/connection:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
   packages/core: {}
@@ -153,40 +153,40 @@ importers:
   packages/lifecycle:
     dependencies:
       '@dsh-std/composition':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../composition
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
 
   packages/manifest:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
   packages/messages:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
   packages/model:
     dependencies:
       '@dsh-std/command':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../command
       '@dsh-std/connection':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../connection
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
 
   packages/namespace-guard: {}
@@ -194,76 +194,76 @@ importers:
   packages/presentation:
     dependencies:
       '@dsh-std/connection':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../connection
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
   packages/sdk:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/lifecycle':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../lifecycle
 
   packages/session:
     dependencies:
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
 
   packages/storage:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
   packages/tool:
     dependencies:
       '@dsh-std/composition':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../composition
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
 
   packages/ui:
     dependencies:
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
 
   packages/ui-browser:
     dependencies:
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
       '@dsh-std/sdk':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../sdk
       '@dsh-std/ui':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../ui
 
   packages/workspace:
     dependencies:
       '@dsh-std/connection':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../connection
       '@dsh-std/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       '@dsh-std/manifest':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../manifest
       '@dsh-std/session':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../session
 
 packages:

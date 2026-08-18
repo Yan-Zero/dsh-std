@@ -15,9 +15,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dsh-std/manifest": "workspace:*",
-    "@dsh-std/sdk": "workspace:*",
-    "@dsh-std/ui": "workspace:*"
+    "@dsh-std/manifest": "workspace:^",
+    "@dsh-std/sdk": "workspace:^",
+    "@dsh-std/ui": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

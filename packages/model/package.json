@@ -1,6 +1,6 @@
 {
   "name": "@dsh-std/model",
-  "version": "0.1.0-rc1",
+  "version": "0.1.0-rc2",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/model" },
   "publishConfig": { "access": "public" },
@@ -15,10 +15,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dsh-std/core": "workspace:*",
-    "@dsh-std/manifest": "workspace:*",
-    "@dsh-std/connection": "workspace:*",
-    "@dsh-std/command": "workspace:*"
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/manifest": "workspace:^",
+    "@dsh-std/connection": "workspace:^",
+    "@dsh-std/command": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

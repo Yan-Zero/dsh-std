@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/adapter-dsh` are recorded here.
 
+## 0.1.0-rc3
+
+- Published compatible ranges for internal `@dsh-std` dependencies, including the updated Model and Command releases.
+
 ## 0.1.0-rc2
 
 - Replaced the Web-only, profile-gated client mapping with a capability-gated DSH browser-client adapter.

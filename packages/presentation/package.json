@@ -20,8 +20,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dsh-std/core": "workspace:*",
-    "@dsh-std/connection": "workspace:*"
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/connection": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

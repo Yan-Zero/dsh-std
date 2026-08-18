@@ -15,10 +15,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dsh-std/core": "workspace:*",
-    "@dsh-std/manifest": "workspace:*",
-    "@dsh-std/connection": "workspace:*",
-    "@dsh-std/presentation": "workspace:*"
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/manifest": "workspace:^",
+    "@dsh-std/connection": "workspace:^",
+    "@dsh-std/presentation": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

@@ -19,10 +19,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dsh-std/connection": "workspace:*",
-    "@dsh-std/core": "workspace:*",
-    "@dsh-std/manifest": "workspace:*",
-    "@dsh-std/session": "workspace:*"
+    "@dsh-std/connection": "workspace:^",
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/manifest": "workspace:^",
+    "@dsh-std/session": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

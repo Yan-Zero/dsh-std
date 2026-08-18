@@ -14,6 +14,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@dsh-std/manifest": "workspace:*" },
+  "dependencies": { "@dsh-std/manifest": "workspace:^" },
   "engines": { "node": "^22.19 || >=24" }
 }

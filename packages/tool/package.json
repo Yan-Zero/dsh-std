@@ -15,8 +15,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dsh-std/composition": "workspace:*",
-    "@dsh-std/manifest": "workspace:*"
+    "@dsh-std/composition": "workspace:^",
+    "@dsh-std/manifest": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }

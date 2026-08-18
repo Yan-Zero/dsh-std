@@ -11,6 +11,13 @@ for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
   const manifestPath = join(directory, 'package.json')
   if (!existsSync(manifestPath)) continue
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    for (const [dependency, range] of Object.entries(manifest[field] ?? {})) {
+      if (dependency.startsWith('@dsh-std/') && range !== 'workspace:^') {
+        errors.push(`${manifest.name}: ${field}.${dependency} must use workspace:^, found ${range}`)
+      }
+    }
+  }
   const changelogPath = join(directory, 'CHANGELOG.md')
   if (!existsSync(changelogPath)) {
     errors.push(`${manifest.name}: CHANGELOG.md is missing`)
@@ -26,5 +33,5 @@ for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
 }
 
 if (errors.length > 0) {
-  throw new Error(`changelog validation failed:\n${errors.join('\n')}`)
+  throw new Error(`package metadata validation failed:\n${errors.join('\n')}`)
 }

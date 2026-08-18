@@ -15,9 +15,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dsh-std/core": "workspace:*",
-    "@dsh-std/manifest": "workspace:*",
-    "@dsh-std/composition": "workspace:*"
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/manifest": "workspace:^",
+    "@dsh-std/composition": "workspace:^"
   },
   "engines": { "node": "^22.19 || >=24" }
 }
