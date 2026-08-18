@@ -2,7 +2,7 @@
 
 Changes to `@dsh-std/adapter-dsh` are recorded here.
 
-## 0.1.0 (draft)
+## 0.1.0-rc1
 
 - Added DeepSeek Harness bootstrap, manifest discovery, facet activation, and standard participant publication.
 - Added DSH mappings for commands, models, tools, sessions, presentation, workspace, and connection.

@@ -8,9 +8,13 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm run build && pnpm -r test",
     "check:changelogs": "node scripts/check-changelogs.mjs",
-    "check": "pnpm run check:changelogs && pnpm run test"
+    "check": "pnpm run check:changelogs && pnpm run test",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm run build && changeset publish --tag rc"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.0",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
