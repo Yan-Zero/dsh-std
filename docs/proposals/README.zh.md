@@ -62,9 +62,9 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 
 | 组件 | 提案 | 状态 |
 | --- | --- | --- |
-| Version Selection | [Version Selection Reference](version-selection.zh.md) | 探索性草案 |
+| Definition-owned Version Compatibility | [Definition-owned Version Compatibility](definition-owned-version-compatibility.zh.md) | 探索性草案 |
 
-本目录不包含任何强制规范。参考协商提案只提供协议 definition 可选的复用部件；core 不默认统一选择模型，实现可自主实现协商与选择逻辑。
+参考协商提案不向 core 增加默认选择模型。协议 definition 可以不采用这些提案；若显式声明采纳，则必须绑定算法版本，并在自身规范中定义输入映射、失败语义与 conformance 要求。
 
 Adapter 是产品实现，不是可移植协议。Conformance 与 provenance 的包名在参考实现验证前暂不确定。
 

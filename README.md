@@ -22,9 +22,9 @@ Profiles               admission and interoperability specifications for concret
                        carried by ecosystem projects (e.g. dsh-ecosystem-spec provides the TUI Profile)
 ```
 
-- **This repository enforces nothing.** Every protocol is optional and replaceable; the packages are reference implementations. An implementation may ignore every DSH Standard protocol and implement its own negotiation and selection logic.
+- **Adoption is voluntary; conformance is conditional.** No project is required to adopt a DSH Standard protocol. Once an implementation claims conformance to a protocol or Profile version, it must satisfy that contract and its conformance requirements. The packages are reusable reference components; protocol authority comes from the specification and coordinates.
 - **Agent self-evolution is encouraged.** The standard does not define what the ecosystem must look like; implementors may freely explore new protocols, negotiation models, and runtime shapes on top of the meta-protocol.
-- **Radical agent architectures are welcome.** Headless facilities, long-running agents, remote runtimes, event-driven systems, or agent architectures that do not exist yet can all appear on the same meta-protocol; when they do, new protocols and profiles supersede old ones without rewriting the standard.
+- **Radical agent architectures are welcome.** Headless facilities, long-running agents, remote runtimes, event-driven systems, or agent architectures that do not exist yet can all appear on the same meta-protocol; new protocols and Profiles may coexist with or supersede older ones without changing the core meta-protocol.
 - Projects that want the familiar "Host + Plugin + Manifest" experience can follow the relevant Profile (see dsh-ecosystem-spec); implementations that do not adopt these concepts are not restricted in any way.
 
 ## Start here
