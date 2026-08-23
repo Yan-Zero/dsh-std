@@ -3,6 +3,29 @@
   "$id": "urn:dsh-std:storage:local-storage:0.15",
   "title": "LocalStorage v0.15 operations",
   "$defs": {
+    "feature": { "enum": ["presence", "list"] },
+    "requirementSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "features": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/feature" } }
+      }
+    },
+    "supportSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "features": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/feature" } },
+        "maxListPageSize": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "features": { "contains": { "const": "list" } } }, "required": ["features"] },
+          "then": { "required": ["maxListPageSize"] },
+          "else": { "not": { "required": ["maxListPageSize"] } }
+        }
+      ]
+    },
     "jsonValue": {
       "oneOf": [
         { "type": "null" },
@@ -51,6 +74,37 @@
       "additionalProperties": false,
       "required": ["deleted"],
       "properties": { "deleted": { "type": "boolean" } }
+    },
+    "hasInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": { "key": { "type": "string", "minLength": 1 } }
+    },
+    "hasOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exists"],
+      "properties": { "exists": { "type": "boolean" } }
+    },
+    "listInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit"],
+      "properties": {
+        "limit": { "type": "integer", "minimum": 1 },
+        "prefix": { "type": "string" },
+        "cursor": { "type": "string", "minLength": 1 }
+      }
+    },
+    "listOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keys"],
+      "properties": {
+        "keys": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "nextCursor": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }

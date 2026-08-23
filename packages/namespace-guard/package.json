@@ -1,6 +1,6 @@
 {
   "name": "dsh-std",
-  "version": "0.0.0-development",
+  "version": "0.1.1-rc.1",
   "description": "Development namespace guard for the DSH plugin interoperability standard",
   "type": "module",
   "exports": {

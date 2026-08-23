@@ -5,3 +5,5 @@
 规范见 [Message Observation](../../docs/proposals/message-observer.zh.md)。
 
 本包定义 Community v0.15 的 `messages.dsh/v1alpha1` `MessageObserver` 协议坐标、协商 definition、事件类型和 ContentBlock text/image 子集校验器。事件来源、订阅调度与授权界面由实现提供。
+
+rc1 的 envelope 仍然有效。Producer 可以额外提供结构化 scope、correlation、redaction、payload schema 和 envelope version 元数据；旧事件缺少 `redactions` 不表示事件没有经过裁剪。

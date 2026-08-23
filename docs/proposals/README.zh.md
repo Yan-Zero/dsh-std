@@ -58,6 +58,14 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 | Conformance | [Conformance and Validation](conformance.zh.md) | 探索性草案 |
 | Provenance | [Impact and Ownership Records](provenance.zh.md) | 探索性草案 |
 
+## 协商模型
+
+| 组件 | 提案 | 状态 |
+| --- | --- | --- |
+| Version Compatibility | [Protocol Version Compatibility and Negotiation](version-compatibility.zh.md) | 草案 |
+
+Core 不提供默认版本选择模型。版本兼容关系、选择算法、agreement 和失败语义由相应协议 definition 拥有。
+
 Adapter 是产品实现，不是可移植协议。Conformance 与 provenance 的包名在参考实现验证前暂不确定。
 
 `dsh-std` 不在表中。该包只占用无 scope 的 npm 名称，不提供协议或运行时 API。

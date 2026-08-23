@@ -2,11 +2,13 @@
 
 - 文档类型：设计提案
 - 状态：探索性草案
-- 日期：2026-08-16
+- 日期：2026-08-19
 
 ## Summary
 
 Component Composition 定义如何把一组静态 manifests 中的 facets、运行时协议声明和显式 policy 输入组合成 activation plan。
+
+Facet 以静态 `supports` 声明可提供的协议，以 `requires` 声明需要注入的协议。Composition rule 在候选代码执行前建立 requirement 与 support 的 binding；实现只依赖 binding，不枚举或探测其他实现。
 
 它使用领域协议提供的 composition rule 做静态 preflight，并在 activation 产生 staged/live declarations 后调用 core 完成实际协议协商。Composition 不替协议决定领域专属的数量、选择和冲突规则。
 
@@ -15,6 +17,8 @@ Component Composition 定义如何把一组静态 manifests 中的 facets、运�
 一个运行环境可能同时包含内建组件、第三方插件和按连接出现的实现。简单地按注册顺序调用它们会产生不稳定结果：
 
 - 两个组件可能声明相同 id 或互斥版本；
+- 同一发行物可能同时经多个安装或发现路径出现；
+- consumer 可能在其 provider 尚未可用时被启动；
 - 某种扩展允许多项，另一种只能有一个实现；
 - 有的实现需要由 shell 选择，有的可以自动合并；
 - 静态 manifest 声称支持协议，但运行时只启用了其中一部分；
@@ -52,6 +56,28 @@ Composition 接收经过 Manifest version 校验和投影的组件声明，不�
 
 Manifest annotation 只有在已注册的 composition rule 或显式 policy 声明理解它时才参与计划。未知、可忽略的 annotation 不改变兼容性；无法投影但被其 Manifest 版本声明为 required 的语义必须在进入 composition 前失败。
 
+### Component identity
+
+Composition 以规范化后的 component name、version 和 manifest 内容识别静态输入。完全等价的声明即使由多个发现路径提交，也必须归并为一个 component；发现路径不构成 component identity、优先级或激活顺序。
+
+相同 name 和 version 的非等价声明不得归并。相同 name 的多个 version 也不得按枚举或注册顺序选择。调用方必须在进入 composition 前提供唯一、确定的 component 集，或者把冲突报告为不兼容。
+
+Manifest 的存储格式、包管理器布局和发现机制不属于本规范。实现可以保留这些信息用于诊断，但不得使它们改变等价输入的 composition 结果。
+
+### Provision and injection
+
+Facet 的潜在 `supports` 是 provision 声明，`requires` 是 injection 声明。它们描述协议关系，不表示代码已经执行或服务已经可用。
+
+Composition 为每项 requirement 和 potential support 分配在本次 plan 内稳定的标识。协议的 composition rule 可以返回 binding，把一个 requirement 连接到零个、一个或多个 compatible supports。Binding 的数量、选择、合并和排他语义由该协议规定；Composition 不提供全局单例或“最后注册者优先”规则。
+
+Facet 不得通过枚举全局实现、读取发现路径或观察注册先后选择 provider。Consumer 只接收已协商 binding 对应的协议 client。Provider 也不需要知道有哪些 consumer；binding 与 activation scope 由 coordinator 持有。
+
+Binding 引用的静态 support 只建立 activation dependency。Provider facet 必须先于 consumer facet 激活。Binding 引用已有 live participant 时不产生新的 activation dependency。
+
+Required binding 在运行时可用之前，consumer facet 不得进入 active 状态。实现可以把它保持为 pending，或输出新的 composition revision。已注入的 required binding 消失时，实现必须先撤销依赖该 binding 的 consumer effects，再完成 provider 的释放。Optional requirement 的缺失不得阻止无依赖部分继续工作。
+
+Composition rule 返回的 requirement 和 support 标识必须来自同一次 preflight 输入。同一 requirement 不得由多个互相独立的 rule result 重复绑定。非法引用、重复引用和由 binding 形成的 activation cycle 都使 plan 不兼容。
+
 ### Facet selection
 
 Composition 独立选择 component 中的各个 facets。选择条件至少包括：
@@ -74,7 +100,7 @@ Activation definition 可以在没有 driver 时参与静态校验，但不能�
 
 Composition 不把 manifest 的潜在 supports 伪装成 live declarations。计划分为两个阶段：
 
-1. preflight 使用 facet 的静态 requirements、support 上限、现有 live declarations 和协议 composition rules，判断候选计划是否有实现可能，并建立 activation 次序或约束；
+1. preflight 使用 facet 的静态 requirements、support 上限、现有 live declarations 和协议 composition rules，判断候选计划是否有实现可能，建立 binding、activation 次序或约束；
 2. lifecycle 创建 planned participant，激活 facet 并取得 staged supports 后，composition 才把实际 declarations 交给 core evaluator；definition 决定是否兼容以及 agreement 的内容。
 
 Preflight 成功不是协议 agreement。静态候选在运行时没有发布、少发布、校验失败或状态变化时，candidate plan 必须失败、回滚或重新组合。
@@ -83,7 +109,7 @@ Definition catalog 不要求所有坐标来自同一目录。某项 definition �
 
 同一坐标存在内容不一致的 definitions 时，输入无效。Composition 不能使用 definition、package 或 registry 的发现顺序解决冲突。
 
-Composition 不把所有协议统一解释成“一个 consumer 绑定一个 provider”。协议可以自行采用：
+Composition 不把所有协议统一解释成“一个 consumer 绑定一个 provider”。协议可以自行形成以下 binding 或约束：
 
 - 多项并存；
 - 唯一实现；
@@ -125,6 +151,7 @@ Composition 没有通用“最后注册者覆盖”规则。协议未提供规�
 - 被选择、跳过和拒绝的 component 与 facet；
 - 每个 selected facet 对应的 activation kind、静态声明 digest 和计划实例边界；
 - protocol preflight report；
+- requirement 与 support 的 binding，以及由此产生的 activation dependency；
 - 对已有 live declarations 可立即形成的 core negotiation report；
 - activation 后必须验证的 agreement conditions；
 - 每项 extension 的 owner 与 composition 结果；
@@ -161,6 +188,14 @@ Composition 需要每个可组合协议定义自己的规则。早期协议如�
 ### 由 loader 顺序解决冲突
 
 加载顺序通常来自文件枚举、依赖安装或异步时序，难以复现，也无法在执行代码前解释结果。Composition plan 使用显式规则和 policy。
+
+### 由 consumer 探测 provider
+
+Consumer 启动后再探测全局对象，会把依赖满足变成时序条件，也无法获得一致的释放顺序。Provision、injection 和 binding 把依赖关系保存在 plan 中；consumer 只在 binding 可用时激活。
+
+### 按发现路径区分等价 component
+
+安装拓扑不是 component identity。同一份规范化声明经多个路径到达同一 composition scope 时，重复执行会产生额外实例，而把路径视为冲突又会使依赖布局改变兼容性。Composition 因此归并等价声明，但不标准化路径本身。
 
 ### 在 core 中统一 composition mode
 

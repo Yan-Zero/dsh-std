@@ -271,24 +271,18 @@ describe('@dsh-std/adapter-dsh', () => {
     expect((await adapter.snapshot()).facets.some(row => row.identity.component === 'example.fixture.component')).toBe(false)
   })
 
-  it('loads a component browser half only when the Web client-module host is active', async () => {
+  it('discovers a browser facet from the standard manifest without a product Loader entry', async () => {
     const { ctx, adapter } = await fixture()
-    const loaderEntries: Array<{ options: { name: string } }> = []
-    const created: string[] = []
-    const removed: string[] = []
+    const routes: Array<{
+      path: string
+      handler(request: { method?: string; url?: string }, response: {
+        writeHead(status: number, headers?: Record<string, string>): void
+        end(body?: Uint8Array | string): void
+      }): void
+    }> = []
     const provide = ctx.provide.bind(ctx) as (name: string, value: unknown) => void
-    provide('clientModules', {})
-    provide('loader', {
-      entries: () => loaderEntries,
-      async create(options: { name: string }) {
-        created.push(options.name)
-        loaderEntries.push({ options })
-        return `entry:${options.name}`
-      },
-      async remove(id: string) {
-        removed.push(id)
-        loaderEntries.splice(0)
-      },
+    provide('webServer', {
+      register(route: typeof routes[number]) { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1) } },
     })
     const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-web-profile-'))
     temporaryRoots.push(profileDir)
@@ -299,67 +293,52 @@ describe('@dsh-std/adapter-dsh', () => {
     }))
     writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
       name: 'web-component', version: '1.0.0', type: 'module',
-      exports: { '.': './index.js', './client': './client.js' },
-      dsh: { client: { platform: 'web', inject: ['@dsh-std/adapter-dsh'] } },
     }))
     writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
       $schema: 'urn:example:dsh-plugin:0.15', manifestVersion: '0.15',
       id: 'example.web.component', name: 'Web Component', version: '1.0.0',
       facets: { host: { entry: 'standard.js', apiVersion: 'v1alpha1' } },
-      requires: { contracts: [] }, permissions: [], contributes: { commands: [] }, subscriptions: [],
+      requires: { contracts: [] }, permissions: [], contributes: {
+        commands: [],
+        'x-dev.dsh-std.extensions': [{
+          id: 'example.web.component.browser',
+          apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'LocalModule', name: 'browser',
+          spec: {
+            module: 'client.js',
+            requirements: [{
+              apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost',
+              spec: { surfaces: [{
+                apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'SettingsSection', mode: 'local-module',
+              }] },
+            }],
+          },
+        }],
+      }, subscriptions: [],
     }))
     writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
+    writeFileSync(join(componentDir, 'client.js'), 'window.__ModuleLoader__.load({ id: "web-component", factory: () => ({ default: { activate() {} } }) });\n')
 
     const disposers = await adapter.mountProfileComponents(profileDir)
-    expect(created).toEqual(['web-component'])
-    for (const dispose of [...disposers].reverse()) await dispose()
-    expect(removed).toEqual(['entry:web-component'])
-  })
-
-  it('loads a component browser half when the Web client-module host starts later', async () => {
-    const { ctx, adapter } = await fixture()
-    const loaderEntries: Array<{ options: { name: string } }> = []
-    const created: string[] = []
-    const removed: string[] = []
-    const provide = ctx.provide.bind(ctx) as (name: string, value: unknown) => void
-    provide('loader', {
-      entries: () => loaderEntries,
-      async create(options: { name: string }) {
-        created.push(options.name)
-        loaderEntries.push({ options })
-        return `entry:${options.name}`
-      },
-      async remove(id: string) {
-        removed.push(id)
-        loaderEntries.splice(0)
-      },
+    const facets = adapter.browserFacets()
+    expect(facets).toEqual([expect.objectContaining({
+      moduleId: 'web-component', facet: 'browser',
+      manifest: expect.objectContaining({ metadata: expect.objectContaining({ name: 'example.web.component' }) }),
+    })])
+    await expect(adapter.components()).resolves.toEqual(expect.arrayContaining([expect.objectContaining({
+      id: 'example.web.component', displayName: 'Web Component', version: '1.0.0',
+      facets: [expect.objectContaining({ name: 'host', state: 'active' })],
+    })]))
+    await vi.waitFor(() => { expect(routes).toHaveLength(1) })
+    let status = 0
+    let body: Uint8Array | string | undefined
+    routes[0]!.handler({ method: 'GET', url: facets[0]!.url }, {
+      writeHead(value) { status = value },
+      end(value) { body = value },
     })
-    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-late-web-profile-'))
-    temporaryRoots.push(profileDir)
-    const componentDir = join(profileDir, 'node_modules', 'late-web-component')
-    mkdirSync(componentDir, { recursive: true })
-    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
-      name: 'fixture-profile', private: true, dependencies: { 'late-web-component': '1.0.0' },
-    }))
-    writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
-      name: 'late-web-component', version: '1.0.0', type: 'module',
-      exports: { '.': './index.js', './client': './client.js' },
-      dsh: { client: { platform: 'web', inject: ['@dsh-std/adapter-dsh'] } },
-    }))
-    writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
-      $schema: 'urn:example:dsh-plugin:0.15', manifestVersion: '0.15',
-      id: 'example.late.web.component', name: 'Late Web Component', version: '1.0.0',
-      facets: { host: { entry: 'standard.js', apiVersion: 'v1alpha1' } },
-      requires: { contracts: [] }, permissions: [], contributes: { commands: [] }, subscriptions: [],
-    }))
-    writeFileSync(join(componentDir, 'standard.js'), 'export default { activate() {} }\n')
-
-    const disposers = await adapter.mountProfileComponents(profileDir)
-    expect(created).toEqual([])
-    provide('clientModules', {})
-    await vi.waitFor(() => { expect(created).toEqual(['late-web-component']) })
+    expect(status).toBe(200)
+    expect(Buffer.from(body as Uint8Array).toString('utf8')).toContain('__ModuleLoader__.load')
     for (const dispose of [...disposers].reverse()) await dispose()
-    await vi.waitFor(() => { expect(removed).toEqual(['entry:late-web-component']) })
+    expect(adapter.browserFacets()).toEqual([])
   })
 
   it('loads a Community v0.15 host facet from a package-relative entry', async () => {

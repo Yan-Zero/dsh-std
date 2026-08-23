@@ -10,6 +10,7 @@ export const KIND = 'MessageObserver'
 export const READ_PERMISSION = 'messages.observe.read'
 export const EVENT_TYPE = 'messages.observe'
 export const EVENT_VERSION = '0.15'
+export const ENVELOPE_VERSION = '0.15'
 
 export type PrivacyClass = 'public' | 'internal' | 'sensitive'
 export type MessageEventKind = 'message.created' | 'message.received' | 'message.sent'
@@ -44,6 +45,14 @@ export interface MessageEvent {
   readonly privacyClass: PrivacyClass
   readonly summary: string
   readonly payload: MessagePayload
+  /** Optional structured metadata added after the rc1 legacy envelope. */
+  readonly envelopeVersion?: typeof ENVELOPE_VERSION
+  readonly scopeType?: string
+  readonly scopeId?: string
+  readonly correlationId?: string
+  readonly redactions?: readonly string[]
+  /** An absolute identifier selected locally; validators never fetch it. */
+  readonly payloadSchema?: string
 }
 
 export interface MessageSubscription {
@@ -81,7 +90,10 @@ export function validateSubscription(value: unknown): asserts value is MessageSu
 export function validateMessageEvent(value: unknown): asserts value is MessageEvent {
   const envelope = exactRecord(
     value,
-    ['eventType', 'eventVersion', 'eventId', 'scope', 'sequence', 'privacyClass', 'summary', 'payload'],
+    [
+      'eventType', 'eventVersion', 'eventId', 'scope', 'sequence', 'privacyClass', 'summary', 'payload',
+      'envelopeVersion', 'scopeType', 'scopeId', 'correlationId', 'redactions', 'payloadSchema',
+    ],
     ['eventType', 'eventVersion', 'eventId', 'scope', 'sequence', 'privacyClass', 'summary', 'payload'],
     'MessageObserver event',
   )
@@ -98,6 +110,22 @@ export function validateMessageEvent(value: unknown): asserts value is MessageEv
     throw new TypeError('MessageObserver event.privacyClass is invalid')
   }
   boundedText(envelope.summary, 1024, 'MessageObserver event.summary', true)
+  if (envelope.envelopeVersion !== undefined && envelope.envelopeVersion !== ENVELOPE_VERSION) {
+    throw new TypeError(`MessageObserver event.envelopeVersion must be ${JSON.stringify(ENVELOPE_VERSION)}`)
+  }
+  if (envelope.envelopeVersion === undefined && [
+    envelope.scopeType, envelope.scopeId, envelope.correlationId, envelope.redactions, envelope.payloadSchema,
+  ].some(field => field !== undefined)) {
+    throw new TypeError('MessageObserver event.envelopeVersion is required with structured envelope metadata')
+  }
+  if ((envelope.scopeType === undefined) !== (envelope.scopeId === undefined)) {
+    throw new TypeError('MessageObserver event.scopeType and scopeId must be provided together')
+  }
+  if (envelope.scopeType !== undefined) boundedText(envelope.scopeType, 64, 'MessageObserver event.scopeType', false)
+  if (envelope.scopeId !== undefined) boundedText(envelope.scopeId, 256, 'MessageObserver event.scopeId', false)
+  if (envelope.correlationId !== undefined) boundedText(envelope.correlationId, 256, 'MessageObserver event.correlationId', false)
+  if (envelope.redactions !== undefined) validateRedactions(envelope.redactions)
+  if (envelope.payloadSchema !== undefined) absoluteIdentifier(envelope.payloadSchema, 'MessageObserver event.payloadSchema')
   validatePayload(envelope.payload)
 }
 
@@ -147,6 +175,27 @@ function validatePayload(value: unknown): asserts value is MessagePayload {
   if (payload.truncated !== undefined && typeof payload.truncated !== 'boolean') {
     throw new TypeError('MessageObserver event.payload.truncated must be boolean')
   }
+}
+
+function validateRedactions(value: unknown): asserts value is readonly string[] {
+  if (!Array.isArray(value) || value.length > 256) {
+    throw new TypeError('MessageObserver event.redactions must be an array of at most 256 entries')
+  }
+  const seen = new Set<string>()
+  for (const [index, redaction] of value.entries()) {
+    boundedText(redaction, 1024, `MessageObserver event.redactions[${index}]`, false)
+    if (seen.has(redaction)) throw new TypeError(`MessageObserver event.redactions contains duplicate ${JSON.stringify(redaction)}`)
+    seen.add(redaction)
+  }
+}
+
+function absoluteIdentifier(value: unknown, label: string): asserts value is string {
+  boundedText(value, 2048, label, false)
+  let identifier: URL
+  try { identifier = new URL(value) } catch (error) {
+    throw new TypeError(`${label} must be an absolute URI`, { cause: error })
+  }
+  if (identifier.protocol === '') throw new TypeError(`${label} must be an absolute URI`)
 }
 
 function negotiatePublisher(input: Parameters<NonNullable<ProtocolDefinition['negotiate']>>[0]) {

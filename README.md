@@ -8,6 +8,25 @@ DSH Standard is a collection of independently versioned protocols that implement
 
 Protocol packages may ship types, validators, negotiation algorithms, state machines, or conformance fixtures as reference implementations. A conforming implementation does not have to use the TypeScript packages or DeepSeek Harness.
 
+## Vision: layered, optional, non-coercive
+
+DSH Standard is organized in three layers:
+
+```text
+Meta-protocol (core)   only defines how protocols are declared and negotiated; no domain concepts, no fixed roles
+        |
+Domain protocols       connection / command / tool / session / presentation / agent ...
+        |              independently versioned, implementable and replaceable; future protocols may supersede them
+        |
+Profiles               admission and interoperability specifications for concrete product shapes,
+                       carried by ecosystem projects (e.g. dsh-ecosystem-spec provides the TUI Profile)
+```
+
+- **Adoption is voluntary; conformance is conditional.** No project is required to adopt a DSH Standard protocol. Once an implementation claims conformance to a protocol or Profile version, it must satisfy that contract and its conformance requirements. The packages are reusable reference components; protocol authority comes from the specification and coordinates.
+- **Agent self-evolution is encouraged.** The standard does not define what the ecosystem must look like; implementors may freely explore new protocols, negotiation models, and runtime shapes on top of the meta-protocol.
+- **Radical agent architectures are welcome.** Headless facilities, long-running agents, remote runtimes, event-driven systems, or agent architectures that do not exist yet can all appear on the same meta-protocol; new protocols and Profiles may coexist with or supersede older ones without changing the core meta-protocol.
+- Projects that want the familiar "Host + Plugin + Manifest" experience can follow the relevant Profile (see dsh-ecosystem-spec); implementations that do not adopt these concepts are not restricted in any way.
+
 ## Start here
 
 - Read the [architecture](docs/architecture.md) for the boundary between the meta-protocol, independent protocols, and product implementations.

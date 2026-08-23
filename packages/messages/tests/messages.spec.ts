@@ -64,4 +64,27 @@ describe('@dsh-std/messages', () => {
     })).toThrow(/base64/u)
     expect(() => validateMessageEvent({ ...event, privacyClass: 'secret' })).toThrow(/privacyClass/u)
   })
+
+  it('accepts optional structured envelope metadata while preserving the rc1 shape', () => {
+    expect(() => validateMessageEvent(event)).not.toThrow()
+    const parsed = parseMessageEvent({
+      ...event,
+      envelopeVersion: '0.15',
+      scopeType: 'session',
+      scopeId: 'demo',
+      correlationId: 'request-1',
+      redactions: ['payload.content[1]'],
+      payloadSchema: 'urn:example:messages:payload:0.15',
+    })
+    expect(parsed).toMatchObject({ scopeType: 'session', scopeId: 'demo', redactions: ['payload.content[1]'] })
+    expect(Object.isFrozen(parsed.redactions)).toBe(true)
+    expect(() => validateMessageEvent({ ...event, envelopeVersion: '0.15', scopeType: 'session' })).toThrow(/provided together/u)
+    expect(() => validateMessageEvent({ ...event, correlationId: 'request-1' })).toThrow(/envelopeVersion is required/u)
+    expect(() => validateMessageEvent({
+      ...event, envelopeVersion: '0.15', redactions: ['payload', 'payload'],
+    })).toThrow(/duplicate/u)
+    expect(() => validateMessageEvent({
+      ...event, envelopeVersion: '0.15', payloadSchema: './payload.schema.json',
+    })).toThrow(/absolute URI/u)
+  })
 })

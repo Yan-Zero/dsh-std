@@ -1,4 +1,5 @@
-import type { ComponentManifest } from '@dsh-std/manifest'
+import { defineProtocolDeclaration, type ProtocolRequirement } from '@dsh-std/core'
+import type { ComponentManifest, ManifestDefinitionCatalog } from '@dsh-std/manifest'
 import type { FacetModule } from '@dsh-std/sdk'
 import type { UiSurfaceRequirement } from '@dsh-std/ui'
 
@@ -64,6 +65,40 @@ export interface BrowserUiFacetInput {
   readonly module: FacetModule
 }
 
+/** Static package declaration for one browser-realm facet module. */
+export interface BrowserUiLocalModuleSpec {
+  readonly module: string
+  readonly requirements?: readonly ProtocolRequirement[]
+}
+
+/** Manifest extension definition used when a package format has no client-facet field. */
+export const localModuleExtensionDefinition = Object.freeze({
+  apiVersion: API_VERSION,
+  kind: LOCAL_MODULE_ACTIVATION_KIND,
+  validateSpec(value: unknown): BrowserUiLocalModuleSpec {
+    if (!record(value)) throw new TypeError('Browser LocalModule spec must be an object')
+    exact(value, ['module', 'requirements'], 'Browser LocalModule spec')
+    packageRelative(value.module, 'Browser LocalModule spec.module')
+    if (value.requirements !== undefined && !Array.isArray(value.requirements)) {
+      throw new TypeError('Browser LocalModule spec.requirements must be an array')
+    }
+    const requirements = value.requirements === undefined
+      ? undefined
+      : defineProtocolDeclaration({
+          participant: { id: 'browser-local-module-validation' },
+          requires: value.requirements as readonly ProtocolRequirement[],
+        }).requires
+    return Object.freeze({
+      module: value.module,
+      ...(requirements === undefined ? {} : { requirements }),
+    })
+  },
+})
+
+export function registerManifest(catalog: ManifestDefinitionCatalog): () => void {
+  return catalog.registerExtension(localModuleExtensionDefinition)
+}
+
 export interface BrowserUiFacetHost {
   mountFacet(input: BrowserUiFacetInput): Promise<() => Promise<void>>
 }
@@ -103,4 +138,21 @@ export function defineBrowserUiFacet(input: BrowserUiFacetInput): {
       context.effect(() => dispose, `Browser UI facet ${input.manifest.metadata.name}#${input.facet}`)
     },
   })
+}
+
+function packageRelative(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${label} must be a non-empty string`)
+  if (value.startsWith('/') || value.startsWith('\\') || /^[a-zA-Z]:[\\/]/u.test(value)) {
+    throw new TypeError(`${label} must be package-relative`)
+  }
+  if (value.replaceAll('\\', '/').split('/').includes('..')) throw new TypeError(`${label} must remain inside the package`)
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function exact(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const unknown = Object.keys(value).find(key => !allowed.includes(key) && !key.startsWith('x-'))
+  if (unknown !== undefined) throw new TypeError(`${label} contains unknown field ${JSON.stringify(unknown)}`)
 }

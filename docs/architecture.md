@@ -107,4 +107,8 @@ Every protocol owns its `apiVersion`. Core identifies the protocol and dispatche
 
 An incompatible domain change uses a new protocol version. An implementation may advertise multiple versions during migration. Whether multiple versions can be active in one connection or process is also protocol-defined.
 
+npm package versions and protocol coordinates are independent version axes. Within the `0.1.0-rcN` release line, each later release must continue to accept declarations, payloads, and baseline handler shapes accepted by earlier release candidates, without changing the meaning of existing fields or operations. New capabilities must be optional fields, optional operations, or explicitly negotiated features; sharing an `apiVersion` does not enable them implicitly.
+
+The `0.1.1-rc.N` release line begins a new package-level compatibility cycle and may revise exported development APIs, but it cannot rewrite an already published protocol coordinate in place. An incompatible observable domain change still requires a new `apiVersion`, such as `v1alpha2`, with any simultaneous support for the old coordinate governed by that protocol's migration rules.
+
 Implementations should produce machine-readable reports that distinguish unknown protocols, incompatible versions, missing optional requirements, and protocol-specific failures.

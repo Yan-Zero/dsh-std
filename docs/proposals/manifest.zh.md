@@ -2,7 +2,7 @@
 
 - 文档类型：设计提案
 - 状态：方向已确认，格式草案
-- 日期：2026-08-17
+- 日期：2026-08-20
 
 ## Summary
 
@@ -84,12 +84,12 @@ interface CommunityPluginManifestV015 {
       readonly apiVersion: string
     }
   }
-  readonly requires: {
-    readonly contracts: readonly CommunityContractReference[]
+  readonly requires?: {
+    readonly contracts?: readonly CommunityContractReference[]
   }
-  readonly permissions: readonly unknown[]
-  readonly contributes: Readonly<Record<string, readonly unknown[]>>
-  readonly subscriptions: readonly unknown[]
+  readonly permissions?: readonly unknown[]
+  readonly contributes?: Readonly<Record<string, readonly unknown[]>>
+  readonly subscriptions?: readonly unknown[]
   readonly license?: string
   readonly source?: unknown
   readonly artifact?: unknown
@@ -102,6 +102,8 @@ interface CommunityContractReference extends ApiReference {
 ```
 
 该结构按以下规则进入共同组件模型：
+
+`requires`、`permissions`、`contributes` 和 `subscriptions` 是可选容器；`requires.contracts` 也是可选数组。缺少这些字段必须与对应空对象或空数组产生等价 projection。Host 不得因省略空容器而拒绝 Manifest，也不得从字段缺失推断未声明的 requirement、permission、contribution 或 subscription。
 
 - `id`、`name`、`version`、`license`、`source` 和 `artifact` 形成 component metadata；
 - `facets.host.entry` 形成 `host` facet 的 activation；

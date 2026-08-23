@@ -42,12 +42,15 @@ export interface ProtocolNegotiationOutcome<Agreement = unknown> {
   readonly issues?: readonly ProtocolIssue[]
 }
 
+/** Exact protocol coordinate whose definition-owned spec is being validated. */
+export interface ProtocolValidationContext extends ApiReference {}
+
 export interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, Agreement = unknown, Policy = unknown>
   extends ApiReference {
   /** Every accepted wire/static API version. No compatibility is inferred by core. */
   readonly accepts?: readonly string[]
-  validateRequirement(spec: unknown): RequirementSpec
-  validateSupport(spec: unknown): SupportSpec
+  validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
+  validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
   negotiate(
     input: ProtocolNegotiationInput<RequirementSpec, SupportSpec, Policy>,
   ): ProtocolNegotiationOutcome<Agreement>
@@ -147,8 +150,8 @@ export class ProtocolCatalog {
             requirement: Object.freeze({
               ...requirement,
               ...(Object.hasOwn(requirement, 'spec')
-                ? { spec: stored.definition.validateRequirement(requirement.spec) }
-                : { spec: stored.definition.validateRequirement(undefined) }),
+                ? { spec: stored.definition.validateRequirement(requirement.spec, validationContext(requirement)) }
+                : { spec: stored.definition.validateRequirement(undefined, validationContext(requirement)) }),
             }),
           }))
         } catch (error) {
@@ -176,8 +179,8 @@ export class ProtocolCatalog {
             support: Object.freeze({
               ...support,
               ...(Object.hasOwn(support, 'spec')
-                ? { spec: stored.definition.validateSupport(support.spec) }
-                : { spec: stored.definition.validateSupport(undefined) }),
+                ? { spec: stored.definition.validateSupport(support.spec, validationContext(support)) }
+                : { spec: stored.definition.validateSupport(undefined, validationContext(support)) }),
             }),
           }))
         } catch (error) {
@@ -241,6 +244,10 @@ function validateDefinition(definition: ProtocolDefinition): void {
 
 function freezeDefinition(definition: ProtocolDefinition): ProtocolDefinition {
   return Object.freeze({ ...definition, ...(definition.accepts === undefined ? {} : { accepts: Object.freeze([...definition.accepts]) }) })
+}
+
+function validationContext(reference: ApiReference): ProtocolValidationContext {
+  return Object.freeze({ apiVersion: reference.apiVersion, kind: reference.kind })
 }
 
 function freezeIssue(issue: ProtocolIssue): ProtocolIssue {

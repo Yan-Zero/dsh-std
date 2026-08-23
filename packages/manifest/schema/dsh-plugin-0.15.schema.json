@@ -3,7 +3,7 @@
   "title": "DSH Plugin Manifest Community Draft v0.15",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "manifestVersion", "id", "name", "version", "facets", "requires", "permissions", "contributes", "subscriptions"],
+  "required": ["$schema", "manifestVersion", "id", "name", "version", "facets"],
   "properties": {
     "$schema": { "type": "string", "format": "uri" },
     "manifestVersion": { "const": "0.15" },
@@ -29,7 +29,6 @@
     "requires": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contracts"],
       "properties": {
         "contracts": { "type": "array", "items": { "$ref": "#/$defs/contract" } },
         "services": { "type": "array", "maxItems": 0 }
@@ -38,7 +37,6 @@
     "permissions": { "type": "array", "items": { "$ref": "#/$defs/permission" } },
     "contributes": {
       "type": "object",
-      "required": ["commands"],
       "properties": {
         "commands": { "type": "array", "items": { "$ref": "#/$defs/command" } },
         "panels": { "type": "array", "maxItems": 0 }

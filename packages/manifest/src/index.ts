@@ -46,16 +46,16 @@ export interface CommunityPluginManifestV015 {
   readonly facets: {
     readonly host: { readonly entry: string; readonly apiVersion: string }
   }
-  readonly requires: {
-    readonly contracts: readonly CommunityContractReference[]
+  readonly requires?: {
+    readonly contracts?: readonly CommunityContractReference[]
     readonly services?: readonly never[]
   }
-  readonly permissions: readonly CommunityPermissionRequest[]
-  readonly contributes: {
-    readonly commands: readonly CommunityCommandContribution[]
+  readonly permissions?: readonly CommunityPermissionRequest[]
+  readonly contributes?: {
+    readonly commands?: readonly CommunityCommandContribution[]
     readonly panels?: readonly never[]
   } & Readonly<Record<string, readonly unknown[]>>
-  readonly subscriptions: readonly CommunitySubscription[]
+  readonly subscriptions?: readonly CommunitySubscription[]
   readonly license?: string
   readonly source?: { readonly repository: string; readonly revision?: string }
   readonly artifact?: { readonly digest: string; readonly algorithm: 'sha256'; readonly path: string }
@@ -273,10 +273,10 @@ function validateCommunityManifest(value: Record<string, unknown>): void {
   nonEmpty(value.version, 'community v0.15 manifest.version')
   parseSemanticVersion(value.version as string)
   validateCommunityFacets(value.facets)
-  validateCommunityRequirements(value.requires)
-  validateCommunityPermissions(value.permissions)
-  validateCommunityContributions(value.contributes)
-  validateCommunitySubscriptions(value.subscriptions)
+  if (value.requires !== undefined) validateCommunityRequirements(value.requires)
+  if (value.permissions !== undefined) validateCommunityPermissions(value.permissions)
+  if (value.contributes !== undefined) validateCommunityContributions(value.contributes)
+  if (value.subscriptions !== undefined) validateCommunitySubscriptions(value.subscriptions)
   if (value.license !== undefined) nonEmpty(value.license, 'community v0.15 manifest.license')
   if (value.source !== undefined) validateCommunitySource(value.source)
   if (value.artifact !== undefined) validateCommunityArtifact(value.artifact)
@@ -321,7 +321,7 @@ export function projectManifest(manifestValue: PluginManifest): ComponentManifes
 }
 
 function projectCommunityManifest(manifest: CommunityPluginManifestV015): ComponentManifest {
-  const extensions: ManifestExtension[] = manifest.contributes.commands.map(row => Object.freeze({
+  const extensions: ManifestExtension[] = (manifest.contributes?.commands ?? []).map(row => Object.freeze({
     apiVersion: 'commands.dsh/v1alpha1',
     kind: 'Command',
     metadata: Object.freeze({
@@ -333,7 +333,7 @@ function projectCommunityManifest(manifest: CommunityPluginManifestV015): Compon
       ...(row.description === undefined ? {} : { description: row.description }),
     }),
   }))
-  for (const [point, contributions] of Object.entries(manifest.contributes)) {
+  for (const [point, contributions] of Object.entries(manifest.contributes ?? {})) {
     if (!point.startsWith('x-')) continue
     for (const contribution of contributions) {
       if (!record(contribution)
@@ -353,8 +353,8 @@ function projectCommunityManifest(manifest: CommunityPluginManifestV015): Compon
       }))
     }
   }
-  const requirements = manifest.requires.contracts.map(communityRequirement)
-  const permissions: PermissionRequest[] = manifest.permissions.map(permission => Object.freeze({
+  const requirements = (manifest.requires?.contracts ?? []).map(communityRequirement)
+  const permissions: PermissionRequest[] = (manifest.permissions ?? []).map(permission => Object.freeze({
     apiVersion: COMMUNITY_PERMISSION_API_VERSION,
     kind: COMMUNITY_PERMISSION_KIND,
     action: permission.name,
@@ -423,9 +423,9 @@ function validateCommunityRequirements(value: unknown): void {
   const label = 'community v0.15 manifest.requires'
   if (!record(value)) throw new TypeError(`${label} must be an object`)
   exact(value, ['contracts', 'services'], label, false)
-  if (!Array.isArray(value.contracts)) throw new TypeError(`${label}.contracts must be an array`)
+  if (value.contracts !== undefined && !Array.isArray(value.contracts)) throw new TypeError(`${label}.contracts must be an array`)
   const seen = new Set<string>()
-  for (const [index, referenceValue] of value.contracts.entries()) {
+  for (const [index, referenceValue] of (value.contracts ?? []).entries()) {
     const rowLabel = `${label}.contracts[${index}]`
     validateApiReference(referenceValue, rowLabel)
     const reference = referenceValue as unknown as Record<string, unknown>
@@ -465,9 +465,9 @@ function validateCommunityContributions(value: unknown): void {
   if (!record(value)) throw new TypeError(`${label} must be an object`)
   const unknown = Object.keys(value).filter(point => point !== 'commands' && point !== 'panels' && !point.startsWith('x-'))
   if (unknown.length > 0) throw new TypeError(`${label} contains unknown contribution point ${JSON.stringify(unknown[0])}`)
-  if (!Array.isArray(value.commands)) throw new TypeError(`${label}.commands must be an array`)
+  if (value.commands !== undefined && !Array.isArray(value.commands)) throw new TypeError(`${label}.commands must be an array`)
   const ids = new Set<string>()
-  for (const [index, commandValue] of value.commands.entries()) {
+  for (const [index, commandValue] of (value.commands ?? []).entries()) {
     const rowLabel = `${label}.commands[${index}]`
     if (!record(commandValue)) throw new TypeError(`${rowLabel} must be an object`)
     exact(commandValue, ['id', 'title', 'description'], rowLabel, false)

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-std/ui-browser",
-  "version": "0.1.0-rc1",
+  "version": "0.1.1-rc.1",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/ui-browser" },
   "publishConfig": { "access": "public" },
@@ -15,6 +15,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@dsh-std/core": "workspace:^",
     "@dsh-std/manifest": "workspace:^",
     "@dsh-std/sdk": "workspace:^",
     "@dsh-std/ui": "workspace:^"

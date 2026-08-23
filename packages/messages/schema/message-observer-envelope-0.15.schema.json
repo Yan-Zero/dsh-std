@@ -13,6 +13,17 @@
     "sequence": { "type": "integer", "minimum": 0 },
     "privacyClass": { "enum": ["public", "internal", "sensitive"] },
     "summary": { "type": "string", "maxLength": 1024 },
+    "envelopeVersion": { "const": "0.15" },
+    "scopeType": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "scopeId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "correlationId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "redactions": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+    },
+    "payloadSchema": { "type": "string", "format": "uri", "maxLength": 2048 },
     "payload": {
       "type": "object",
       "additionalProperties": false,
@@ -25,6 +36,13 @@
         "truncated": { "type": "boolean" }
       }
     }
+  },
+  "dependentRequired": {
+    "scopeType": ["scopeId", "envelopeVersion"],
+    "scopeId": ["scopeType", "envelopeVersion"],
+    "correlationId": ["envelopeVersion"],
+    "redactions": ["envelopeVersion"],
+    "payloadSchema": ["envelopeVersion"]
   },
   "$defs": {
     "contentBlock": {

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { defineComponentManifest } from '@dsh-std/manifest'
+import { defineComponentManifest, ManifestDefinitionCatalog } from '@dsh-std/manifest'
 import { defineFacet } from '@dsh-std/sdk'
-import { defineBrowserUiFacet, FACET_HOST_SERVICE } from '../src/index.js'
+import {
+  defineBrowserUiFacet,
+  FACET_HOST_SERVICE,
+  localModuleExtensionDefinition,
+  registerManifest,
+} from '../src/index.js'
 
 describe('@dsh-std/ui-browser local module entry', () => {
   it('depends only on the negotiated browser-local facet host', async () => {
@@ -29,5 +34,20 @@ describe('@dsh-std/ui-browser local module entry', () => {
     expect(mountFacet).toHaveBeenCalledWith({ manifest, facet: 'browser', module })
     await cleanup?.()
     expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('validates a package-declared browser module without product metadata', () => {
+    expect(localModuleExtensionDefinition.validateSpec({
+      module: 'lib/client.js',
+      requirements: [{ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost', spec: { surfaces: [] } }],
+    })).toEqual({
+      module: 'lib/client.js',
+      requirements: [{ apiVersion: 'ui.dsh/v1alpha1', kind: 'ContributionHost', spec: { surfaces: [] } }],
+    })
+    expect(() => localModuleExtensionDefinition.validateSpec({ module: '../client.js' })).toThrow(/inside the package/)
+    const catalog = new ManifestDefinitionCatalog()
+    const unregister = registerManifest(catalog)
+    expect(catalog.extension({ apiVersion: 'browser.ui.dsh/v1alpha1', kind: 'LocalModule' })).toBeDefined()
+    unregister()
   })
 })

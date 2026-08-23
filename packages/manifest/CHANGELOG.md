@@ -2,6 +2,11 @@
 
 Changes to `@dsh-std/manifest` are recorded here.
 
+## 0.1.1-rc.1
+
+- Allowed empty `requires`, `permissions`, `contributes`, and `subscriptions` containers to be omitted without changing Community v0.15 projection semantics.
+- Preserved every manifest accepted by `0.1.0-rc1`.
+
 ## 0.1.0-rc1
 
 - Added Community v0.15 manifest parsing and validation.
