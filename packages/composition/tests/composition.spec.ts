@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog } from '@dsh-std/core'
 import { defineComponentManifest } from '@dsh-std/manifest'
-import { compose } from '../src/index.js'
+import { CompositionRuleCatalog, compose } from '../src/index.js'
 
 const protocols = new ProtocolCatalog({ name: 'test', version: '1.0.0' })
 protocols.register({
@@ -27,6 +27,71 @@ const manifest = defineComponentManifest({
 })
 
 describe('@dsh-std/composition', () => {
+  it('keeps the legacy manifests input while collapsing the same release', () => {
+    const plan = compose({ manifests: [manifest, manifest], protocols, drivers: [] })
+    expect(plan.selected).toEqual([])
+    expect(plan.issues).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'component-id-conflict' }),
+    ]))
+  })
+
+  it('lets a protocol rule bind supports and orders the provider before its consumer', () => {
+    const value = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.binding', version: '1.0.0' },
+      spec: { facets: [
+        {
+          name: 'a-consumer',
+          activation: { apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint', spec: { module: './consumer.js' } },
+          protocols: { requires: [{ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }] },
+        },
+        {
+          name: 'z-provider',
+          activation: { apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint', spec: { module: './provider.js' } },
+          protocols: { supports: [{ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }] },
+        },
+      ] },
+    })
+    const rules = new CompositionRuleCatalog()
+    rules.register({
+      apiVersion: 'example.dsh/v1alpha1', kind: 'Service',
+      preflight: input => ({
+        bindings: [{
+          requirementId: input.requirements[0]!.id,
+          supportIds: [input.potentialSupports[0]!.id],
+        }],
+      }),
+    })
+    const plan = compose({
+      manifests: [value], protocols,
+      drivers: [{ id: 'example.cordis', apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint' }],
+    }, rules)
+    expect(plan.compatible).toBe(true)
+    expect(plan.bindings).toHaveLength(1)
+    expect(plan.activationOrder).toEqual([
+      'example.binding@1.0.0#z-provider',
+      'example.binding@1.0.0#a-consumer',
+    ])
+  })
+
+  it('rejects bindings outside the rule preflight scope', () => {
+    const rules = new CompositionRuleCatalog()
+    rules.register({
+      apiVersion: 'example.dsh/v1alpha1', kind: 'Service',
+      preflight: input => ({
+        bindings: [{ requirementId: input.requirements[0]!.id, supportIds: ['unknown-support'] }],
+      }),
+    })
+    const plan = compose({
+      manifests: [manifest], protocols,
+      drivers: [
+        { id: 'example.cordis', apiVersion: 'adapter.dsh/v1alpha1', kind: 'CordisEntrypoint' },
+        { id: 'example.browser', apiVersion: 'adapter.dsh/v1alpha1', kind: 'BrowserEntrypoint' },
+      ],
+    }, rules)
+    expect(plan).toMatchObject({ compatible: false, issues: [{ code: 'protocol-binding-invalid' }] })
+  })
+
   it('selects facets by installed drivers rather than facet names', () => {
     const plan = compose({
       manifests: [manifest], protocols,

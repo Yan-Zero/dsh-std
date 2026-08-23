@@ -18,6 +18,22 @@ const commandResultSchema = z.union([
     ]),
   }),
 ])
+const browserFacetCatalogSchema = z.array(z.object({
+  moduleId: z.string(),
+  url: z.string(),
+  manifest: z.unknown(),
+  facet: z.string(),
+}))
+const standardComponentCatalogSchema = z.array(z.object({
+  id: z.string(),
+  displayName: z.string().optional(),
+  version: z.string(),
+  facets: z.array(z.object({
+    name: z.string(),
+    state: z.union([z.literal('active'), z.literal('degraded')]),
+    message: z.string().optional(),
+  })),
+}))
 
 const commandInvocation = Object.freeze({
   id: '@dsh-std/adapter-dsh#dshStd/command',
@@ -50,12 +66,40 @@ const commandInvocation = Object.freeze({
   }),
 })
 
+const browserFacetsInvocation = Object.freeze({
+  id: '@dsh-std/adapter-dsh#dshStd/browserFacets',
+  service: 'dshStd',
+  namespace: 'dshStd',
+  method: 'browserFacets',
+  invocation: Object.freeze({ kind: 'direct' as const }),
+  parameters: Object.freeze([]),
+  result: Object.freeze({
+    mode: 'strict' as const,
+    typeSymbol: '@dsh-std/adapter-dsh#dshStd/browserFacets:result',
+    schema: browserFacetCatalogSchema,
+  }),
+})
+
+const componentsInvocation = Object.freeze({
+  id: '@dsh-std/adapter-dsh#dshStd/components',
+  service: 'dshStd',
+  namespace: 'dshStd',
+  method: 'components',
+  invocation: Object.freeze({ kind: 'direct' as const }),
+  parameters: Object.freeze([]),
+  result: Object.freeze({
+    mode: 'strict' as const,
+    typeSymbol: '@dsh-std/adapter-dsh#dshStd/components:result',
+    schema: standardComponentCatalogSchema,
+  }),
+})
+
 /** Typert Loader artifact discovered from package.json exports["./typert"]. */
 export const TYPERT = Object.freeze({
   package: '@dsh-std/adapter-dsh',
   face: 'host' as const,
   schemas: Object.freeze([]),
-  invocations: Object.freeze([commandInvocation]),
+  invocations: Object.freeze([commandInvocation, browserFacetsInvocation, componentsInvocation]),
   model: Object.freeze({
     services: Object.freeze([Object.freeze({
       description: 'DSH adapter bridge used by browser-realm standard facets.',
@@ -69,6 +113,16 @@ export const TYPERT = Object.freeze({
         name: 'command',
         signature: 'command(sessionId: string, line: string): Promise<DshCommandExecution | undefined>',
         summary: 'Execute one standard command for a browser-realm contribution.',
+      }), Object.freeze({
+        kind: 'method',
+        name: 'browserFacets',
+        signature: 'browserFacets(): readonly DshBrowserFacetDescriptor[]',
+        summary: 'List browser-realm standard facet modules installed in the active profile.',
+      }), Object.freeze({
+        kind: 'method',
+        name: 'components',
+        signature: 'components(): Promise<readonly DshStandardComponentDescriptor[]>',
+        summary: 'List active standard components and facet states.',
       })]),
       types: Object.freeze([]),
     })]),

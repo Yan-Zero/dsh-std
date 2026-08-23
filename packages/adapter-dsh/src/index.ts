@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
@@ -144,6 +144,12 @@ import {
 } from '@dsh-std/ui'
 import type { FacetModule } from '@dsh-std/sdk'
 import {
+  API_VERSION as BROWSER_UI_API_VERSION,
+  LOCAL_MODULE_ACTIVATION_KIND as BROWSER_LOCAL_MODULE_KIND,
+  localModuleExtensionDefinition as browserLocalModuleExtensionDefinition,
+  registerManifest as registerBrowserUiManifest,
+} from '@dsh-std/ui-browser'
+import {
   writeWorkspaceBytes,
   type WorkspaceFileSystem,
   type WorkspaceTarget,
@@ -168,6 +174,12 @@ export const DSH_UI_API_VERSION = UI_API_VERSION
 export const DSH_UI_CONTRIBUTION_HOST_KIND = UI_CONTRIBUTION_HOST_KIND
 const ADAPTER_COMPONENT = 'std.dsh.adapter-dsh'
 const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
+const BROWSER_MODULE_ROUTE = '/dsh-std/browser-modules'
+
+interface BrowserModuleResponse {
+  writeHead(status: number, headers?: Readonly<Record<string, string>>): void
+  end(body?: Uint8Array | string): void
+}
 
 export interface AdapterConfig {
   readonly profile?: string
@@ -252,6 +264,29 @@ interface DshAgentLike {
     requestHeader(): { readonly config?: { readonly provider?: string; readonly model?: string } } | undefined
     append(type: string, data: unknown): void
   }
+}
+
+export interface DshBrowserFacetDescriptor {
+  readonly moduleId: string
+  readonly url: string
+  readonly manifest: ComponentManifest
+  readonly facet: string
+}
+
+export interface DshStandardComponentDescriptor {
+  readonly id: string
+  readonly displayName?: string
+  readonly version: string
+  readonly facets: readonly {
+    readonly name: string
+    readonly state: 'active' | 'degraded'
+    readonly message?: string
+  }[]
+}
+
+interface DshBrowserModuleRecord extends DshBrowserFacetDescriptor {
+  readonly path: string
+  readonly routeId: string
 }
 
 interface InstalledToolOverride {
@@ -900,6 +935,7 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly uiProviders = new Map<string, UiContributionProvider>()
   private readonly uiBindings = new Map<string, Set<BoundContributionHost>>()
   private readonly uiProviderDisposers = new Set<() => Promise<void>>()
+  private readonly browserModules = new Map<string, DshBrowserModuleRecord>()
 
   constructor(ctx: Context, config: AdapterConfig) {
     super(ctx, 'dshStd', { namespace: DSH_STD_NAMESPACE })
@@ -1023,9 +1059,25 @@ export class DshStandardAdapter extends TypertRemoteService {
         await mounted.handle.deactivate('adapter disposed')
       }
       this.manifests.clear()
+      this.browserModules.clear()
       for (const dispose of [...this.commandProviderDisposers].reverse()) dispose()
       for (const dispose of [...this.uiProviderDisposers].reverse()) await dispose()
     }, '@dsh-std/adapter-dsh lifecycle')
+    ctx.inject(['webServer'], activeCtx => {
+      const webServer = activeCtx.get('webServer') as {
+        register(route: {
+          kind: 'prefix'
+          path: string
+          handler(request: { method?: string; url?: string }, response: BrowserModuleResponse): void
+        }): () => void
+      } | undefined
+      if (webServer === undefined || typeof webServer.register !== 'function') return
+      activeCtx.effect(() => webServer.register({
+        kind: 'prefix',
+        path: BROWSER_MODULE_ROUTE,
+        handler: (request, response) => { this.serveBrowserModule(request, response) },
+      }), '@dsh-std/adapter-dsh browser modules')
+    })
     for (const initialize of REMOTE_INITIALIZERS) initialize.call(this)
   }
 
@@ -1111,6 +1163,15 @@ export class DshStandardAdapter extends TypertRemoteService {
         assertHostCompatibility(portableManifest)
         const manifest = projectManifest(portableManifest)
         for (const facet of manifest.spec.facets) {
+          for (const extension of facet.extensions ?? []) {
+            if (!sameProtocol(extension, {
+              apiVersion: BROWSER_UI_API_VERSION,
+              kind: BROWSER_LOCAL_MODULE_KIND,
+            })) continue
+            disposers.push(this.mountBrowserModule(packageName, packageDir, manifest, extension))
+          }
+        }
+        for (const facet of manifest.spec.facets) {
           if (facet.activation?.apiVersion !== FACET_MODULE_API_VERSION
             || facet.activation.kind !== FACET_MODULE_KIND) continue
           const spec = facetModuleActivationDefinition.validateSpec(facet.activation.spec)
@@ -1126,8 +1187,6 @@ export class DshStandardAdapter extends TypertRemoteService {
             ...(module.snapshot === undefined ? {} : { snapshot: () => module.snapshot?.() ?? {} }),
           }))
         }
-        const disposeClient = await mountDshBrowserClient(this.selfCtx, packageName, packageDir)
-        if (disposeClient !== undefined) disposers.push(disposeClient)
       }
       return Object.freeze(disposers)
     } catch (error) {
@@ -1294,6 +1353,113 @@ export class DshStandardAdapter extends TypertRemoteService {
       commandId,
       result,
     })
+  }
+
+  /** Browser-local facet catalog consumed by the adapter's own client entry. */
+  browserFacets(): readonly DshBrowserFacetDescriptor[] {
+    return Object.freeze([...this.browserModules.values()]
+      .sort((left, right) => left.moduleId.localeCompare(right.moduleId))
+      .map(({ moduleId, url, manifest, facet }) => Object.freeze({ moduleId, url, manifest, facet })))
+  }
+
+  /** Active standard components for product inventory surfaces. */
+  async components(): Promise<readonly DshStandardComponentDescriptor[]> {
+    const snapshot = await this.snapshot()
+    const states = new Map(snapshot.facets.map(row => [facetKey(row.identity), row]))
+    return Object.freeze([...this.manifests.values()]
+      .sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
+      .map(manifest => Object.freeze({
+        id: manifest.metadata.name,
+        ...(manifest.metadata.displayName === undefined ? {} : { displayName: manifest.metadata.displayName }),
+        version: manifest.metadata.version,
+        facets: Object.freeze(manifest.spec.facets.map(facet => {
+          const state = states.get(facetKey({
+            component: manifest.metadata.name,
+            version: manifest.metadata.version,
+            facet: facet.name,
+          }))
+          return Object.freeze({
+            name: facet.name,
+            state: state?.state ?? 'active',
+            ...(state?.message === undefined ? {} : { message: state.message }),
+          })
+        })),
+      })))
+  }
+
+  private mountBrowserModule(
+    packageName: string,
+    packageDir: string,
+    sourceManifest: ComponentManifest,
+    extension: ManifestExtension,
+  ): () => Promise<void> {
+    const spec = browserLocalModuleExtensionDefinition.validateSpec(extension.spec)
+    const path = resolveFacetModule(packageDir, spec.module)
+    const moduleId = packageName
+    if (this.browserModules.has(moduleId)) {
+      throw new Error(`browser module id ${JSON.stringify(moduleId)} is already registered`)
+    }
+    const facet = extension.metadata.name
+    const manifest = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1',
+      kind: 'Component',
+      metadata: sourceManifest.metadata,
+      spec: { facets: [{
+        name: facet,
+        activation: {
+          apiVersion: BROWSER_UI_API_VERSION,
+          kind: BROWSER_LOCAL_MODULE_KIND,
+          spec: { module: spec.module },
+        },
+        ...(spec.requirements === undefined ? {} : { protocols: { requires: spec.requirements } }),
+      }] },
+    })
+    const rev = createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16)
+    const routeId = createHash('sha256').update(`${moduleId}\0${facet}`).digest('hex').slice(0, 24)
+    const record = Object.freeze({
+      moduleId,
+      routeId,
+      path,
+      manifest,
+      facet,
+      url: `${BROWSER_MODULE_ROUTE}/${routeId}.js?rev=${rev}`,
+    })
+    this.browserModules.set(moduleId, record)
+    let active = true
+    return async () => {
+      if (!active) return
+      active = false
+      if (this.browserModules.get(moduleId) === record) this.browserModules.delete(moduleId)
+    }
+  }
+
+  private serveBrowserModule(
+    request: { readonly method?: string; readonly url?: string },
+    response: BrowserModuleResponse,
+  ): void {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      response.writeHead(405, { Allow: 'GET, HEAD' })
+      response.end()
+      return
+    }
+    const pathname = new URL(request.url ?? '/', 'http://dsh.invalid').pathname
+    const match = /^\/dsh-std\/browser-modules\/([a-f0-9]{24})\.js$/u.exec(pathname)
+    const record = match === null
+      ? undefined
+      : [...this.browserModules.values()].find(candidate => candidate.routeId === match[1])
+    if (record === undefined) {
+      response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+      response.end('Not Found')
+      return
+    }
+    const source = readFileSync(record.path)
+    response.writeHead(200, {
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Content-Length': String(source.byteLength),
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    response.end(request.method === 'HEAD' ? undefined : source)
   }
 
   /** Browser-safe command entry: no product-specific route and no implicit Presentation claim. */
@@ -1501,11 +1667,12 @@ export function createDshManifestCatalog(): ManifestDefinitionCatalog {
   catalog.registerExtension(sessionEventExtensionDefinition)
   catalog.registerExtension(workspaceProviderExtensionDefinition)
   registerUiManifest(catalog)
+  registerBrowserUiManifest(catalog)
   return catalog
 }
 
 const REMOTE_INITIALIZERS: Array<(this: DshStandardAdapter) => void> = []
-for (const method of ['describe', 'snapshot', 'catalog', 'execute', 'command'] as const) {
+for (const method of ['describe', 'snapshot', 'catalog', 'execute', 'command', 'browserFacets', 'components'] as const) {
   const implementation = DshStandardAdapter.prototype[method]
   const applyRemote = Remote as unknown as (
     value: (...args: never[]) => unknown,
@@ -1642,62 +1809,6 @@ function packageDirectory(anchor: string, packageName: string): string | undefin
     if (existsSync(join(candidate, 'package.json'))) return candidate
   }
   return undefined
-}
-
-interface ProductLoaderEntry {
-  readonly options: { readonly name?: string }
-}
-
-interface ProductLoader {
-  entries(): readonly ProductLoaderEntry[]
-  create(options: { readonly name: string }): Promise<string>
-  remove(id: string): Promise<void>
-}
-
-/**
- * Seat a standard component's ordinary DSH browser half only when this Host is
- * the Web profile. `clientModules` is the positive product capability check;
- * TUI and headless profiles return before inspecting client metadata or loader.
- */
-async function mountDshBrowserClient(
-  ctx: Context,
-  packageName: string,
-  packageDir: string,
-): Promise<(() => Promise<void>) | undefined> {
-  const packageJson = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as Record<string, unknown>
-  const dsh = record(packageJson.dsh) ? packageJson.dsh : undefined
-  const client = dsh !== undefined && record(dsh.client) ? dsh.client : undefined
-  if (client === undefined || client.platform !== 'web') return undefined
-
-  const mount = async (activeCtx: Context): Promise<(() => Promise<void>) | undefined> => {
-    const get = activeCtx.get.bind(activeCtx) as (name: string) => unknown
-    const loader = get('loader') as Partial<ProductLoader> | undefined
-    if (loader === undefined || typeof loader.entries !== 'function'
-      || typeof loader.create !== 'function' || typeof loader.remove !== 'function') {
-      throw new Error('DSH Web client module host is active without a compatible Cordis loader')
-    }
-    if (loader.entries().some(entry => entry.options.name === packageName)) return undefined
-    const id = await loader.create({ name: packageName })
-    let active = true
-    return async () => {
-      if (!active) return
-      active = false
-      await loader.remove!(id)
-    }
-  }
-
-  const get = ctx.get.bind(ctx) as (name: string) => unknown
-  if (get('clientModules') !== undefined) return await mount(ctx)
-
-  // The adapter can activate before the Web client-module registry. Keep the
-  // browser half pending on that positive product capability instead of
-  // permanently deciding that the current profile is headless.
-  const fiber = ctx.inject(['clientModules'], childCtx => {
-    childCtx.effect(async () => await mount(childCtx) ?? (() => undefined), `standard Web client ${packageName}`)
-  })
-  return async () => {
-    await fiber.dispose()
-  }
 }
 
 function assertFacetModule(value: unknown, module: string): asserts value is FacetModule {

@@ -39,6 +39,32 @@ function manifest() {
 }
 
 describe('@dsh-std/manifest', () => {
+  it('keeps rc1 manifests valid while allowing empty containers to be omitted', () => {
+    const minimal = defineManifest({
+      $schema: COMMUNITY_DRAFT_SCHEMA_EXAMPLE,
+      manifestVersion: COMMUNITY_V015_MANIFEST_VERSION,
+      id: 'example.acme.minimal',
+      name: 'Minimal',
+      version: '1.0.0',
+      facets: { host: { entry: 'dist/host.js', apiVersion: 'v1alpha1' } },
+    })
+    expect(projectManifest(minimal).spec.facets[0]).toEqual({
+      name: 'host',
+      activation: {
+        apiVersion: 'lifecycle.dsh/v1alpha1',
+        kind: 'FacetModule',
+        spec: { module: 'dist/host.js' },
+      },
+    })
+    expect(() => defineManifest({
+      ...structuredClone(minimal),
+      requires: {},
+      contributes: {},
+      permissions: [],
+      subscriptions: [],
+    })).not.toThrow()
+  })
+
   it('parses a Community v0.15 dsh-plugin.json without fetching its schema URI', () => {
     const parsed = parseManifest(JSON.stringify(manifest()), { source: 'dsh-plugin.json' })
     expect(parsed).toMatchObject({

@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/tool` are recorded here.
 
+## 0.1.1-rc.1
+
+- Aligned the package with the workspace `0.1.1` prerelease line without changing the existing Tool protocol semantics.
+
 ## 0.1.0-rc1
 
 - Defined portable Tool and ToolOverride resources with owner-aware composition.

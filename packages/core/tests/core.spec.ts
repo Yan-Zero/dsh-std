@@ -22,7 +22,12 @@ function catalog() {
     },
     negotiate(input) {
       const issues = input.requirements.flatMap(row =>
-        input.supports.length === 0 && row.requirement.optional !== true
+        !input.supports.some(candidate =>
+          candidate.participant !== row.participant
+          && (candidate.support.apiVersion === row.requirement.apiVersion
+            || (candidate.support.apiVersion === 'widgets.example/v1beta1'
+              && row.requirement.apiVersion === 'widgets.example/v1alpha1')),
+        ) && row.requirement.optional !== true
           ? [{ code: 'provider-missing', severity: 'error' as const, participant: row.participant, message: 'widget provider is missing' }]
           : [],
       )
@@ -61,11 +66,11 @@ describe('@dsh-std/core', () => {
     const report = catalog().negotiate([
       defineProtocolDeclaration({
         participant: { id: 'consumer' },
-        requires: [{ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }],
+        requires: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' }],
       }),
       defineProtocolDeclaration({
         participant: { id: 'provider' },
-        supports: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' }],
+        supports: [{ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }],
       }),
     ])
     expect(report).toMatchObject({
@@ -76,6 +81,71 @@ describe('@dsh-std/core', () => {
         participants: ['consumer', 'provider'], agreement: { providers: ['provider'] }, issues: [],
       }],
     })
+  })
+
+  it('lets the definition accept newer support for an older requirement without inferring the reverse', () => {
+    const protocols = catalog()
+    const backwardCompatible = protocols.negotiate([
+      defineProtocolDeclaration({
+        participant: { id: 'older-consumer' },
+        requires: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' }],
+      }),
+      defineProtocolDeclaration({
+        participant: { id: 'newer-provider' },
+        supports: [{ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }],
+      }),
+    ])
+    expect(backwardCompatible.compatible).toBe(true)
+
+    const forwardIncompatible = protocols.negotiate([
+      defineProtocolDeclaration({
+        participant: { id: 'newer-consumer' },
+        requires: [{ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }],
+      }),
+      defineProtocolDeclaration({
+        participant: { id: 'older-provider' },
+        supports: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' }],
+      }),
+    ])
+    expect(forwardIncompatible).toMatchObject({
+      compatible: false,
+      issues: [{ code: 'provider-missing', participant: 'newer-consumer' }],
+    })
+  })
+
+  it('passes the exact declared coordinate to version-aware validators', () => {
+    const contexts: string[] = []
+    const protocols = new ProtocolCatalog({ name: 'version-aware', version: '1.0.0' })
+    protocols.register({
+      apiVersion: 'widgets.example/v1alpha1',
+      kind: 'Widget',
+      accepts: ['widgets.example/v1beta1'],
+      validateRequirement(spec, context) {
+        contexts.push(`requirement:${context.apiVersion}#${context.kind}`)
+        return spec
+      },
+      validateSupport(spec, context) {
+        contexts.push(`support:${context.apiVersion}#${context.kind}`)
+        return spec
+      },
+      negotiate: () => ({}),
+    })
+
+    protocols.negotiate([
+      defineProtocolDeclaration({
+        participant: { id: 'consumer' },
+        requires: [{ apiVersion: 'widgets.example/v1beta1', kind: 'Widget' }],
+      }),
+      defineProtocolDeclaration({
+        participant: { id: 'provider' },
+        supports: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' }],
+      }),
+    ])
+
+    expect(contexts).toEqual([
+      'requirement:widgets.example/v1beta1#Widget',
+      'support:widgets.example/v1alpha1#Widget',
+    ])
   })
 
   it('reports missing definitions and required supports separately', () => {

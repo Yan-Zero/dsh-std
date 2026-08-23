@@ -220,7 +220,9 @@ Device code、secret input、approval token 和其他短期值只存在于 invoc
 
 DSH profile 选择 client、terminal 或其他 UI facet，并装入相应 shell 与 surface owners。Profile 选择是 composition 输入；它不是 UI contribution，也不替代 surface requirement 与 agreement。
 
-DSH 原生 client module metadata 映射为对应环境的 facet activation definition。一个被选择的 client facet 可以在同一 activation instance 中向多个 DSH shell registry 注册 UI。Adapter 为每项注册保存 owner 与 disposer，并在 facet deactivate、activation rollback 或 profile composition 替换时按 lifecycle 撤销。插件内部的组件、表单字段、样式和 locale 不逐项投影为标准 contribution。
+标准 Manifest 声明的 browser local module 由 adapter 投影到 DSH client module transport，并作为独立 Cordis fiber 激活；component 不需要为此提供 Host 侧 Loader entry 或 `dsh.client` metadata。一个被选择的 client facet 可以在同一 activation instance 中向多个 DSH shell registry 注册 UI。Adapter 为每项注册保存 owner 与 disposer，并在 facet deactivate、activation rollback 或 profile composition 替换时按 lifecycle 撤销。插件内部的组件、表单字段、样式和 locale 不逐项投影为标准 contribution。
+
+DSH 的 Cordis Loader inventory 与标准 component inventory 是不同的状态域。Adapter 不为标准 component 合成虚假的 Host Loader entry；产品 UI 若同时展示两者，必须保留各自 identity、lifecycle state 与来源。
 
 DSH 的 settings section、tool result view、sidebar entry、terminal scene 等具体接缝只有在各自 surface definition 存在时才映射为 `@dsh-std/ui` surface。其 slot 名、renderer ABI、cardinality 与内容 schema 属于 DSH 生态协议或 adapter mapping，不进入基础 UI envelope。声明一个 UI facet 也不表示它取得所有 DSH UI registry 的访问权。
 

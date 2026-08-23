@@ -2,7 +2,7 @@
 
 - 文档类型：协议提案
 - 状态：草案
-- 日期：2026-08-17
+- 日期：2026-08-20
 
 ## 摘要
 
@@ -43,6 +43,12 @@ MessageEvent {
   privacyClass: "public" | "internal" | "sensitive"
   summary: string
   payload: MessagePayload
+  envelopeVersion?: "0.15"
+  scopeType?: string
+  scopeId?: string
+  correlationId?: string
+  redactions?: string[]
+  payloadSchema?: absolute URI
 }
 ```
 
@@ -51,6 +57,16 @@ MessageEvent {
 `summary` 是经过裁剪的人类可读摘要，不替代结构化 payload。它禁止包含凭据、token 或未授权的完整敏感正文。
 
 Envelope 和 payload 在交给 Observer 后必须视为不可变数据。实现可以复制或冻结对象；不得依赖 Observer 自律来保护其他订阅者。
+
+`0.1.1-rc.1` 增加的 envelope 元数据全部可选，以保持 `0.1.0-rc1` event 有效：
+
+- `envelopeVersion` 标识这组可选元数据的结构版本；使用任一新增元数据时必须出现且值为 `0.15`；
+- `scopeType` 与 `scopeId` 提供结构化 scope identity，必须同时出现；原有 `scope` 字符串仍是必填兼容字段；
+- `correlationId` 关联同一操作链中的事件，不建立跨 scope 顺序；
+- `redactions` 列出 Publisher 已施加的裁剪说明，条目不得重复；
+- `payloadSchema` 是绝对 schema identifier，只用于选择实现已安装的本地 schema，禁止因事件输入联网获取。
+
+`redactions: []` 明确表示 Publisher 声明没有施加裁剪；字段缺失只表示事件采用旧 envelope，Consumer 不得据此推断没有裁剪。新增元数据不得改变 `eventId` 唯一性、`scope` 内 sequence、privacy 或 delivery 语义。
 
 ## Message payload
 
@@ -124,4 +140,6 @@ Publisher 必须按 session、tenant 和授权 scope 隔离事件，禁止跨 sc
 
 ## 兼容性
 
-增加 ContentBlock variant、改变既有字段、扩大事件 kind、改变 delivery guarantee、赋予 Observer 控制权或改变 privacy class 含义，均属于协议兼容性变更，必须使用新的 `apiVersion`。
+在 `0.1.0-rcN` 发布线内，后续版本必须继续接受 rc1 event；新增 envelope 字段必须保持可选，且不能改变旧字段含义。增加 ContentBlock variant、改变既有字段、扩大事件 kind、改变 delivery guarantee、赋予 Observer 控制权或改变 privacy class 含义，均属于协议不兼容变更，必须使用新的 `apiVersion`。
+
+`0.1.1-rcN` 发布线可以开始新的包级开发 API 兼容周期，但不能原地改写 `messages.dsh/v1alpha1` 的可观察语义。

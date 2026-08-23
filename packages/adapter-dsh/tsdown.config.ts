@@ -1,6 +1,7 @@
 import type { UserConfig } from 'tsdown'
 
 const clientExternals = [
+  'react',
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-runtime/client',
   '@deepseek-ai/dsh-client-ui-settings/client',

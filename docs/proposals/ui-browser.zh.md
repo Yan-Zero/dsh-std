@@ -26,6 +26,17 @@
 
 `LocalModule` facet 的 module 必须实现 `FacetModule`。Shell 在激活前对 facet requirements 执行 composition 与协议协商，并只向 activation context 提供已形成 agreement 的 client。
 
+当所用 package Manifest 版本没有表达 client facet 的字段时，component 可以在该 Manifest 的 namespaced extension lane 中声明 `browser.ui.dsh/v1alpha1 LocalModule`。其 `spec` 为：
+
+```ts
+interface BrowserUiLocalModuleSpec {
+  readonly module: string
+  readonly requirements?: readonly ProtocolRequirement[]
+}
+```
+
+`module` 是不得越出 package root 的相对路径。`requirements` 是该 browser facet 的协议要求，不与 Host facet 的 requirements 合并。Host 将该声明投影为同 component identity、以 extension local name 为 facet name 的 `LocalModule` facet。Package metadata、产品 loader entry 和 profile 名不能替代该声明。
+
 同一个 module 必须与 shell 的 renderer、framework instance 和 page realm 兼容。Module value 不得通过 Connection 传输；远端 endpoint 只能交换 descriptor、catalog 与其他可序列化数据。需要在本地呈现远端 runtime 状态时，consumer 端必须安装相符 module，并通过独立领域协议访问远端能力。
 
 Activation instance 失活时，shell 必须撤销该 instance 注册的全部 contributions，取消未完成工作，并调用 facet cleanup。一个 facet 的失败不得移除其他 activation instance 的 view。

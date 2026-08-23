@@ -1,6 +1,7 @@
 /** DeepSeek Harness browser-realm mapping for local standard UI facets. */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import { createElement as h, useEffect, useState, type ReactNode } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
@@ -15,6 +16,7 @@ import {
 import {
   defineComponentManifest,
   findFacet,
+  type ComponentManifest,
 } from '@dsh-std/manifest'
 import { compose, type CompositionPlan } from '@dsh-std/composition'
 import type {
@@ -99,7 +101,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'dsh-standard-browser-ui-adapter'
-export const inject = ['slots', 'locale', 'remote', 'sessions']
+export const inject = ['slots', 'locale', 'remote', 'sessions', 'modules']
 
 /** Install browser-realm surface owners in every shell using the DSH client module graph. */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
@@ -108,32 +110,105 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   }
   const unmountRemote = await remote.$mount(DSH_STD_BROWSER_REMOTE)
   const commandRemote = ctx.get('remote.dshStd') as DshStdBrowserRemote | undefined
-  if (commandRemote === undefined || typeof commandRemote.command !== 'function') {
+  if (commandRemote === undefined || typeof commandRemote.command !== 'function'
+    || typeof commandRemote.browserFacets !== 'function' || typeof commandRemote.components !== 'function') {
     await unmountRemote()
     throw new Error('DSH browser UI adapter failed to mount its command Remote')
   }
   new DshBrowserUiRuntime(ctx, commandRemote)
-  return unmountRemote
+  const catalog = await commandRemote.browserFacets()
+  if (!catalog.ok) {
+    await unmountRemote()
+    throw new Error(`${catalog.error.message} (${catalog.error.code})`)
+  }
+  const modules = ctx.get('modules') as BrowserModuleSystem | undefined
+  if (modules === undefined || typeof modules.import !== 'function') {
+    await unmountRemote()
+    throw new Error('DSH browser UI adapter requires the client module system')
+  }
+  const fibers: Array<{ dispose(): Promise<void> }> = []
+  let unmountInventory = (): void => undefined
+  try {
+    for (const descriptorValue of catalog.value) {
+      const descriptor = parseBrowserFacetDescriptor(descriptorValue)
+      if (!modules.loadCache.has(descriptor.moduleId) && !arrivedBrowserModules.has(descriptor.moduleId)) {
+        await loadBrowserBundle(descriptor.url)
+        arrivedBrowserModules.add(descriptor.moduleId)
+      }
+      const namespace = await modules.import(descriptor.moduleId, location.href, {})
+      const exports = record(namespace, `browser module ${JSON.stringify(descriptor.moduleId)}`)
+      const module = exports.default ?? exports.facet
+      const facetModule = record(module, `browser module ${JSON.stringify(descriptor.moduleId)} default export`)
+      if (typeof facetModule.activate !== 'function') {
+        throw new TypeError(`browser module ${JSON.stringify(descriptor.moduleId)} must export a FacetModule as default`)
+      }
+      const fiber = ctx.plugin(defineBrowserUiFacet({
+        manifest: defineComponentManifest(descriptor.manifest),
+        facet: descriptor.facet,
+        module: facetModule as unknown as FacetModule,
+      }))
+      await fiber.await()
+      fibers.push(fiber)
+    }
+    unmountInventory = mountStandardComponentInventory(ctx, commandRemote)
+  } catch (error) {
+    for (const fiber of fibers.reverse()) await fiber.dispose()
+    await unmountRemote()
+    throw error
+  }
+  return async () => {
+    unmountInventory()
+    for (const fiber of fibers.reverse()) await fiber.dispose()
+    await unmountRemote()
+  }
 }
 
 const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
   package: '@dsh-std/adapter-dsh',
-  descriptors: Object.freeze([Object.freeze({
-    id: '@dsh-std/adapter-dsh#dshStd/command',
-    service: 'dshStd',
-    namespace: 'dshStd',
-    method: 'command',
-    invocation: Object.freeze({ kind: 'direct' as const }),
-    parameters: Object.freeze([
-      remoteStringParameter('sessionId'),
-      remoteStringParameter('line'),
-    ]),
-    result: Object.freeze({
-      mode: 'strict' as const,
-      typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:result',
-      schema: Object.freeze({ parse: parseBrowserCommandExecution }),
+  descriptors: Object.freeze([
+    Object.freeze({
+      id: '@dsh-std/adapter-dsh#dshStd/command',
+      service: 'dshStd',
+      namespace: 'dshStd',
+      method: 'command',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([
+        remoteStringParameter('sessionId'),
+        remoteStringParameter('line'),
+      ]),
+      result: Object.freeze({
+        mode: 'strict' as const,
+        typeSymbol: '@dsh-std/adapter-dsh#dshStd/command:result',
+        schema: Object.freeze({ parse: parseBrowserCommandExecution }),
+      }),
     }),
-  })]),
+    Object.freeze({
+      id: '@dsh-std/adapter-dsh#dshStd/browserFacets',
+      service: 'dshStd',
+      namespace: 'dshStd',
+      method: 'browserFacets',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([]),
+      result: Object.freeze({
+        mode: 'strict' as const,
+        typeSymbol: '@dsh-std/adapter-dsh#dshStd/browserFacets:result',
+        schema: Object.freeze({ parse: parseBrowserFacetCatalog }),
+      }),
+    }),
+    Object.freeze({
+      id: '@dsh-std/adapter-dsh#dshStd/components',
+      service: 'dshStd',
+      namespace: 'dshStd',
+      method: 'components',
+      invocation: Object.freeze({ kind: 'direct' as const }),
+      parameters: Object.freeze([]),
+      result: Object.freeze({
+        mode: 'strict' as const,
+        typeSymbol: '@dsh-std/adapter-dsh#dshStd/components:result',
+        schema: Object.freeze({ parse: parseStandardComponentCatalog }),
+      }),
+    }),
+  ]),
 })
 
 /**
@@ -143,7 +218,7 @@ const DSH_STD_BROWSER_REMOTE: TypertRemoteContribution = Object.freeze({
 export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeFace {
   private readonly providers: readonly UiContributionProvider[]
 
-  constructor(ctx: Context, commandRemote?: DshStdBrowserRemote) {
+  constructor(ctx: Context, commandRemote?: DshStdCommandRemote) {
     super(ctx, FACET_HOST_SERVICE)
     const slots = ctx.get('slots') as unknown as SlotRuntime | undefined
     if (slots === undefined) throw new Error('DSH browser UI adapter requires the client slot registry')
@@ -335,7 +410,7 @@ function bindLocalView(view: DshBrowserLocalView, host: DshBrowserLocalHost): Ds
   return binding
 }
 
-function localHost(ctx: Context, commandRemote?: DshStdBrowserRemote): DshBrowserLocalHost {
+function localHost(ctx: Context, commandRemote?: DshStdCommandRemote): DshBrowserLocalHost {
   // Resolve the product services while the adapter's own fiber is active.
   // Cordis service proxies otherwise rebind property access to the calling
   // facet, which must not need to inject product-specific service names.
@@ -392,8 +467,175 @@ type RemoteResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
-interface DshStdBrowserRemote {
+interface DshStdCommandRemote {
   command(sessionId: string, line: string): Promise<RemoteResult<DshBrowserCommandResultEnvelope | undefined>>
+}
+
+interface DshStdBrowserRemote extends DshStdCommandRemote {
+  browserFacets(): Promise<RemoteResult<readonly BrowserFacetDescriptor[]>>
+  components(): Promise<RemoteResult<readonly StandardComponentDescriptor[]>>
+}
+
+interface BrowserModuleSystem {
+  readonly loadCache: Map<string, unknown>
+  import(specifier: string, parentUrl: string, attributes: Record<string, unknown>): Promise<unknown>
+}
+
+interface BrowserFacetDescriptor {
+  readonly moduleId: string
+  readonly url: string
+  readonly manifest: ComponentManifest
+  readonly facet: string
+}
+
+interface StandardComponentDescriptor {
+  readonly id: string
+  readonly displayName?: string
+  readonly version: string
+  readonly facets: readonly {
+    readonly name: string
+    readonly state: 'active' | 'degraded'
+    readonly message?: string
+  }[]
+}
+
+const arrivedBrowserModules = new Set<string>()
+
+function parseBrowserFacetCatalog(value: unknown): readonly BrowserFacetDescriptor[] {
+  if (!Array.isArray(value)) throw new TypeError('dshStd.browserFacets result must be an array')
+  return Object.freeze(value.map((row, index) => parseBrowserFacetDescriptor(row, `dshStd.browserFacets result[${index}]`)))
+}
+
+function parseBrowserFacetDescriptor(value: unknown, label = 'browser facet descriptor'): BrowserFacetDescriptor {
+  const descriptor = record(value, label)
+  nonEmpty(descriptor.moduleId, `${label}.moduleId`)
+  nonEmpty(descriptor.url, `${label}.url`)
+  if (!descriptor.url.startsWith('/')) throw new TypeError(`${label}.url must be same-origin relative`)
+  nonEmpty(descriptor.facet, `${label}.facet`)
+  const manifest = defineComponentManifest(descriptor.manifest as never)
+  return Object.freeze({
+    moduleId: descriptor.moduleId,
+    url: descriptor.url,
+    manifest,
+    facet: descriptor.facet,
+  })
+}
+
+function parseStandardComponentCatalog(value: unknown): readonly StandardComponentDescriptor[] {
+  if (!Array.isArray(value)) throw new TypeError('dshStd.components result must be an array')
+  return Object.freeze(value.map((item, index) => {
+    const label = `dshStd.components result[${index}]`
+    const row = record(item, label)
+    nonEmpty(row.id, `${label}.id`)
+    nonEmpty(row.version, `${label}.version`)
+    if (row.displayName !== undefined) nonEmpty(row.displayName, `${label}.displayName`)
+    if (!Array.isArray(row.facets)) throw new TypeError(`${label}.facets must be an array`)
+    const facets = Object.freeze(row.facets.map((facetValue, facetIndex) => {
+      const facetLabel = `${label}.facets[${facetIndex}]`
+      const facet = record(facetValue, facetLabel)
+      nonEmpty(facet.name, `${facetLabel}.name`)
+      if (facet.state !== 'active' && facet.state !== 'degraded') throw new TypeError(`${facetLabel}.state is invalid`)
+      if (facet.message !== undefined) nonEmpty(facet.message, `${facetLabel}.message`)
+      return Object.freeze({
+        name: facet.name,
+        state: facet.state,
+        ...(facet.message === undefined ? {} : { message: facet.message }),
+      })
+    }))
+    return Object.freeze({
+      id: row.id,
+      ...(row.displayName === undefined ? {} : { displayName: row.displayName }),
+      version: row.version,
+      facets,
+    })
+  }))
+}
+
+function mountStandardComponentInventory(ctx: ClientContext, remote: DshStdBrowserRemote): () => void {
+  const slots = ctx.get('slots') as unknown as SlotRuntime | undefined
+  const locale = ctx.get('locale') as {
+    register(namespace: string, dictionaries: Readonly<Record<string, Readonly<Record<string, string>>>>): () => void
+    bind(namespace: string): (key: string) => string
+  } | undefined
+  if (slots === undefined || locale === undefined) return () => undefined
+  const namespace = 'settings.dshStdComponents'
+  const unregisterLocale = locale.register(namespace, {
+    en: { tab: 'Standard components', loading: 'Loading standard components…', empty: 'No standard components.', error: 'Failed to load standard components.', active: 'Active', degraded: 'Degraded' },
+    zh: { tab: '标准组件', loading: '正在读取标准组件…', empty: '没有标准组件。', error: '无法读取标准组件。', active: '已激活', degraded: '异常' },
+  })
+  const t = locale.bind(namespace)
+  const unregisterTab = slots.inject('settings.plugins.tab', () => slots.register({
+    name: 'settings.plugins.tab',
+    id: 'dsh-standard-components',
+    order: 20,
+    label: () => t('tab'),
+    locale: namespace,
+    inject: () => ({
+      load: async (): Promise<readonly StandardComponentDescriptor[]> => {
+        const result = await remote.components()
+        if (!result.ok) throw new Error(`${result.error.message} (${result.error.code})`)
+        return result.value
+      },
+      t,
+    }),
+  }, StandardComponentInventory))
+  return () => {
+    unregisterTab()
+    unregisterLocale()
+  }
+}
+
+function StandardComponentInventory(props: {
+  readonly load: () => Promise<readonly StandardComponentDescriptor[]>
+  readonly t: (key: string) => string
+}): ReactNode {
+  const [state, setState] = useState<
+    | { readonly kind: 'loading' }
+    | { readonly kind: 'error' }
+    | { readonly kind: 'ready'; readonly rows: readonly StandardComponentDescriptor[] }
+  >({ kind: 'loading' })
+  useEffect(() => {
+    let active = true
+    void props.load().then(
+      rows => { if (active) setState({ kind: 'ready', rows }) },
+      () => { if (active) setState({ kind: 'error' }) },
+    )
+    return () => { active = false }
+  }, [props.load])
+  if (state.kind === 'loading') return h('p', null, props.t('loading'))
+  if (state.kind === 'error') return h('p', { role: 'alert' }, props.t('error'))
+  if (state.rows.length === 0) return h('p', null, props.t('empty'))
+  const items = state.rows.map(row => h('li', {
+    key: row.id,
+    style: { border: '1px solid var(--border-color, currentColor)', borderRadius: '8px', padding: '10px 12px' },
+  },
+  h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '12px' } },
+    h('strong', null, row.displayName ?? row.id),
+    h('code', null, row.version),
+  ),
+  h('div', { style: { marginTop: '4px', opacity: 0.72, fontSize: '12px' } }, row.id),
+  h('div', { style: { marginTop: '6px', display: 'flex', flexWrap: 'wrap', gap: '6px' } },
+    ...row.facets.map(facet => h('span', {
+      key: facet.name,
+      title: facet.message,
+      style: { fontSize: '12px' },
+    }, `${facet.name} · ${props.t(facet.state)}`)),
+  )))
+  return h('ul', { style: { display: 'grid', gap: '8px', listStyle: 'none', margin: 0, padding: 0 } }, ...items)
+}
+
+async function loadBrowserBundle(url: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script')
+    script.async = true
+    script.src = url
+    script.addEventListener('load', () => { script.remove(); resolve() }, { once: true })
+    script.addEventListener('error', () => {
+      script.remove()
+      reject(new Error(`DSH standard browser module ${url} failed to load`))
+    }, { once: true })
+    document.head.append(script)
+  })
 }
 
 function activationContext(

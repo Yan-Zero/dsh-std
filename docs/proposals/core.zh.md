@@ -146,10 +146,13 @@ Core 不把 component id、facet name 或进程位置规定为 `ParticipantIdent
 `ProtocolDefinition` 是 evaluator 对一份领域协议的本地解释。概念接口如下：
 
 ```ts
+interface ProtocolValidationContext extends ApiReference {}
+
 interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, Agreement = unknown>
   extends ApiReference {
-  validateRequirement(spec: unknown): RequirementSpec
-  validateSupport(spec: unknown): SupportSpec
+  readonly accepts?: readonly string[]
+  validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
+  validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
   negotiate(input: ProtocolNegotiationInput<RequirementSpec, SupportSpec>): ProtocolNegotiationResult<Agreement>
 }
 ```
@@ -157,6 +160,8 @@ interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, A
 具体 TypeScript API 可以为 schema-only 协议提供默认适配器，但不得改变以下语义：
 
 - 协议专属字段由协议 definition 拥有；
+- `accepts` 只表示同一 definition 能识别哪些准确坐标，不推断这些版本兼容；
+- validator 接收原始 `apiVersion + kind` 上下文，并按该准确版本校验 `spec`；
 - 协商结果可由其他符合规范的实现独立复算；
 - 注册顺序不影响结果；
 - definition 不因被注册而产生一项 live implementation。
@@ -168,13 +173,15 @@ Evaluator 在解释一项协议专属 `spec` 前必须取得能够处理该坐�
 一次 core 协商产生机器可读报告。报告至少包含：
 
 - 参与协商的声明及其 revision 或 digest；
-- 每份已处理协议所选的 API version；
+- 负责处理该组声明的 definition 主坐标；
 - 各协议 definition 产生的 agreement；
 - 缺失的可选 requirement；
 - 阻止协商的 issue 及其声明路径；
 - evaluator 的身份与版本。
 
 Agreement 是协议拥有的数据。Core 不假定它一定是 RPC binding、资源选择或权限 grant。调用方也不能仅凭 agreement 绕过相应协议和产品实现的授权检查。
+
+当一份 definition 识别多个 `apiVersion` 时，Core report 的协议坐标仍是 definition 主坐标。请求版本、support 版本和最终采用的 contract dialect 由协议自己的 agreement 按[协议版本兼容与协商提案](version-compatibility.zh.md)记录；Core 不提供通用的版本选择字段。
 
 ### Determinism
 

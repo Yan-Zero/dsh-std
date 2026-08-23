@@ -58,13 +58,13 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 | Conformance | [Conformance and Validation](conformance.zh.md) | 探索性草案 |
 | Provenance | [Impact and Ownership Records](provenance.zh.md) | 探索性草案 |
 
-## 参考协商
+## 协商模型
 
 | 组件 | 提案 | 状态 |
 | --- | --- | --- |
-| Definition-owned Version Compatibility | [Definition-owned Version Compatibility](definition-owned-version-compatibility.zh.md) | 探索性草案 |
+| Version Compatibility | [Protocol Version Compatibility and Negotiation](version-compatibility.zh.md) | 草案 |
 
-参考协商提案不向 core 增加默认选择模型。协议 definition 可以不采用这些提案；若显式声明采纳，则必须绑定算法版本，并在自身规范中定义输入映射、失败语义与 conformance 要求。
+Core 不提供默认版本选择模型。版本兼容关系、选择算法、agreement 和失败语义由相应协议 definition 拥有。
 
 Adapter 是产品实现，不是可移植协议。Conformance 与 provenance 的包名在参考实现验证前暂不确定。
 

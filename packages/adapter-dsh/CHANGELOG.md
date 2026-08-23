@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1-rc.1
+
+- Discover browser `LocalModule` facets from standard manifests and project them through the adapter-owned DSH client module and Cordis lifecycle, without requiring a component root Loader entry.
+- Project active standard components into a dedicated DSH Web plugin-settings tab instead of representing them as fake Cordis Loader entries.
+
 Changes to `@dsh-std/adapter-dsh` are recorded here.
 
 ## 0.1.0-rc3

@@ -1,3 +1,3 @@
 # @dsh-std/composition
 
-Deterministic facet selection and static protocol preflight for DSH Standard components.
+Deterministic facet selection, static protocol preflight, and provision/injection bindings for DSH Standard components.

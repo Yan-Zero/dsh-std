@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/model` are recorded here.
 
+## 0.1.1-rc.1
+
+- Aligned the package with the workspace `0.1.1` prerelease line without changing the existing Model protocol semantics.
+
 ## 0.1.0-rc2
 
 - Published compatible ranges for internal `@dsh-std` dependencies so Command RC upgrades do not install a second protocol copy.
