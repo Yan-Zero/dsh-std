@@ -1,4 +1,4 @@
-import type { ProtocolIssue } from '@dsh-std/core'
+import type { NegotiatedProtocol, ProtocolIssue } from '@dsh-std/core'
 import {
   CONNECTION_API_VERSION,
   freezeEndpoint,
@@ -12,7 +12,7 @@ import {
   type EndpointOffer,
   type ResolveConnectionOptions,
 } from './model.js'
-import { planDigest } from './digest.js'
+import { compareDeterministicCbor, planDigest } from './digest.js'
 import { isCapabilityAgreement } from './rpc.js'
 
 /**
@@ -22,7 +22,8 @@ import { isCapabilityAgreement } from './rpc.js'
  * Offer order is part of the plan identity: `left` MUST be the coordinator (initiator) offer and
  * `right` the responder offer, and both parties MUST resolve with the offers in that same order.
  * Declaration order feeds negotiation issue paths and the digest input, so swapped offers produce
- * a plan whose digest does not compare equal.
+ * a plan whose digest does not compare equal. Digest-bearing result arrays are normalized by the
+ * bytewise order of their deterministic CBOR encodings rather than host locale collation.
  */
 export function resolveConnection(left: EndpointOffer, right: EndpointOffer, options: ResolveConnectionOptions): ConnectionPlan {
   validateEndpointOffer(left)
@@ -39,8 +40,9 @@ export function resolveConnection(left: EndpointOffer, right: EndpointOffer, opt
     ...(options.policy === undefined ? {} : { protocol: options.policy }),
   })
   const report = options.protocols.negotiate([...left.declarations, ...right.declarations], policy)
+  const protocols = normalizeProtocols(report.protocols)
   const bindings: CapabilityBinding[] = []
-  for (const protocol of report.protocols) {
+  for (const protocol of protocols) {
     if (!isCapabilityAgreement(protocol.agreement)) continue
     for (const draft of protocol.agreement.bindings) {
       const consumer = owner.get(draft.consumer)
@@ -55,12 +57,9 @@ export function resolveConnection(left: EndpointOffer, right: EndpointOffer, opt
       }))
     }
   }
-  bindings.sort((a, b) => a.consumer.participantId.localeCompare(b.consumer.participantId)
-    || a.requirement.apiVersion.localeCompare(b.requirement.apiVersion)
-    || a.requirement.kind.localeCompare(b.requirement.kind)
-    || a.provider.participantId.localeCompare(b.provider.participantId))
+  bindings.sort((left, right) => compareDeterministicCbor(bindingSortKey(left), bindingSortKey(right)))
   const numbered = bindings.map((binding, index) => Object.freeze({ ...binding, bindingId: `binding-${String(index + 1)}` }))
-  const issues = Object.freeze(report.issues.map(row => connectionIssue(row, owner)))
+  const issues = Object.freeze(report.issues.map(row => connectionIssue(row, owner)).sort(compareDeterministicCbor))
   const coordinates = Object.freeze([
     Object.freeze({ endpoint: freezeEndpoint(left.endpoint), revision: left.revision }),
     Object.freeze({ endpoint: freezeEndpoint(right.endpoint), revision: right.revision }),
@@ -72,11 +71,29 @@ export function resolveConnection(left: EndpointOffer, right: EndpointOffer, opt
     revision: options.revision,
     offers: coordinates,
     compatible: report.compatible,
-    protocols: report.protocols,
+    protocols,
     bindings: Object.freeze(numbered),
     issues,
   }
   return Object.freeze({ ...agreement, digest: planDigest(agreement) })
+}
+
+function bindingSortKey(binding: CapabilityBinding): Omit<CapabilityBinding, 'bindingId'> {
+  const { bindingId: _bindingId, ...key } = binding
+  return key
+}
+
+function normalizeProtocols(protocols: readonly NegotiatedProtocol[]): readonly NegotiatedProtocol[] {
+  const normalized = protocols.map(protocol => Object.freeze({
+    ...protocol,
+    participants: Object.freeze([...protocol.participants].sort(compareDeterministicCbor)),
+    issues: Object.freeze([...protocol.issues].sort(compareDeterministicCbor)),
+  }))
+  normalized.sort((left, right) => compareDeterministicCbor(
+    [left.apiVersion, left.kind],
+    [right.apiVersion, right.kind],
+  ))
+  return Object.freeze(normalized)
 }
 
 function participantOwners(left: EndpointOffer, right: EndpointOffer): Map<string, CapabilityParticipant> {

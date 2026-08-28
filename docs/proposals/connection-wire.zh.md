@@ -43,7 +43,17 @@ Raw、未认证 TCP 不是本 profile 的合规 carrier。TLS、SSH、QUIC 或�
 - text 必须是有效 UTF-8，不接受未配对 surrogate 的替代编码；
 - 未在当前 frame schema 中允许的字段导致 frame-invalid，`x-` 扩展字段除外。
 
-Plan digest 对规范化 agreement 去除 `digest` 字段后的 deterministic CBOR bytes 计算 SHA-256；计算结果再写入 `digest`。双方不能对包含 digest 自身的对象或各自语言对象的默认序列化结果计算 digest。
+### Plan digest projection and representation
+
+Plan digest 的输入必须是 Endpoint Connection 规范化后的完整 `ConnectionAgreement`，并在编码前执行以下投影：
+
+1. 必须移除顶层 `digest` 字段；
+2. host-language map/object 中表示字段缺席的 `undefined` 值属性必须被省略，不能编码为 CBOR undefined 或替换为 `null`；
+3. root、array element 或其他位置的 `undefined` 必须作为 `plan-invalid` 拒绝；
+4. byte string 必须按原始 bytes 编码，不能转成数字 array、base64 text 或 host object；
+5. 其余值必须满足本 profile 的 CBOR subset；尤其 integer 必须位于 `0..2^53-1`，负整数不能进入 plan digest。
+
+实现必须对投影后的 deterministic CBOR bytes 计算 SHA-256，并把结果表示为 `sha256:` 加 64 个小写十六进制字符。`digest` 因而必须匹配 `^sha256:[0-9a-f]{64}$`。双方不能对包含 digest 自身的对象、各自语言对象的默认序列化结果或不同的缺席值投影计算 digest。
 
 ### Byte-stream framing
 

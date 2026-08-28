@@ -13,9 +13,9 @@ const LONE_SURROGATE = /[\uD800-\uDFFF]/u
 
 /**
  * Computes the plan digest of an agreement without its `digest` field, as `sha256:` followed by
- * 64 lowercase hex digits. Protocol agreements inside the plan must consist of JSON-like data
- * (safe integers, well-formed strings, booleans, null, arrays, plain objects); anything else
- * throws a TypeError naming the offending path.
+ * 64 lowercase hex digits. Protocol agreements inside the plan must consist of the Connection
+ * Wire data model (non-negative safe integers, well-formed strings, byte strings, booleans, null,
+ * arrays, and plain objects); anything else throws a TypeError naming the offending path.
  */
 export function planDigest(agreement: Omit<ConnectionPlan, 'digest'>): string {
   return `sha256:${sha256Hex(deterministicCbor(agreement))}`
@@ -24,17 +24,22 @@ export function planDigest(agreement: Omit<ConnectionPlan, 'digest'>): string {
 /**
  * Encodes a value into the RFC 8949 Core Deterministic Encoding subset the wire profile pins:
  * shortest-form integers, definite lengths, and map keys sorted bytewise by their encodings.
- * Own map properties whose value is `undefined` are dropped before encoding — the same projection
- * `JSON.stringify` gives the agreement on a JSON wire. Every other `undefined`, non-integer or
- * unsafe number, unpaired surrogate, or non-plain object throws a TypeError instead of colliding.
+ * Own map properties whose value is `undefined` are dropped before encoding. Every other
+ * `undefined`, negative, non-integer or unsafe number, unpaired surrogate, cyclic value, or
+ * non-plain object throws a TypeError instead of producing an out-of-profile agreement.
  */
 export function deterministicCbor(value: unknown): Uint8Array {
   const bytes: number[] = []
-  encodeValue(value, bytes, '/')
+  encodeValue(value, bytes, '/', new Set<object>())
   return Uint8Array.from(bytes)
 }
 
-function encodeValue(value: unknown, bytes: number[], path: string): void {
+/** Orders values by the bytewise lexicographic order of their deterministic CBOR encodings. */
+export function compareDeterministicCbor(left: unknown, right: unknown): number {
+  return compareBytes(deterministicCbor(left), deterministicCbor(right))
+}
+
+function encodeValue(value: unknown, bytes: number[], path: string, ancestors: Set<object>): void {
   if (value === null) {
     bytes.push(0xf6)
     return
@@ -44,35 +49,49 @@ function encodeValue(value: unknown, bytes: number[], path: string): void {
     return
   }
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) throw new TypeError(`plan digest input at ${path} must be a safe integer, got ${String(value)}`)
-    if (value >= 0) encodeHead(0, value, bytes)
-    else encodeHead(1, -1 - value, bytes)
+    if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`plan digest input at ${path} must be a non-negative safe integer, got ${String(value)}`)
+    encodeHead(0, value, bytes)
     return
   }
   if (typeof value === 'string') {
     encodeText(value, bytes, path)
     return
   }
+  if (value instanceof Uint8Array) {
+    encodeHead(2, value.byteLength, bytes)
+    for (const byte of value) bytes.push(byte)
+    return
+  }
   if (Array.isArray(value)) {
-    encodeHead(4, value.length, bytes)
-    for (const [index, element] of value.entries()) encodeValue(element, bytes, child(path, String(index)))
+    enter(value, path, ancestors)
+    try {
+      encodeHead(4, value.length, bytes)
+      for (const [index, element] of value.entries()) encodeValue(element, bytes, child(path, String(index)), ancestors)
+    } finally {
+      ancestors.delete(value)
+    }
     return
   }
   if (isPlainObject(value)) {
-    encodeMap(value, bytes, path)
+    enter(value, path, ancestors)
+    try {
+      encodeMap(value, bytes, path, ancestors)
+    } finally {
+      ancestors.delete(value)
+    }
     return
   }
-  throw new TypeError(`plan digest input at ${path} must be null, a boolean, a safe integer, a string, an array, or a plain object, got ${describe(value)}`)
+  throw new TypeError(`plan digest input at ${path} must be null, a boolean, a non-negative safe integer, a string, a byte string, an array, or a plain object, got ${describe(value)}`)
 }
 
-function encodeMap(value: Record<string, unknown>, bytes: number[], path: string): void {
+function encodeMap(value: Record<string, unknown>, bytes: number[], path: string, ancestors: Set<object>): void {
   const entries: { key: number[]; element: number[] }[] = []
   for (const [key, element] of Object.entries(value)) {
     if (element === undefined) continue
     const keyBytes: number[] = []
     encodeText(key, keyBytes, child(path, key))
     const elementBytes: number[] = []
-    encodeValue(element, elementBytes, child(path, key))
+    encodeValue(element, elementBytes, child(path, key), ancestors)
     entries.push({ key: keyBytes, element: elementBytes })
   }
   entries.sort((left, right) => compareBytes(left.key, right.key))
@@ -81,6 +100,11 @@ function encodeMap(value: Record<string, unknown>, bytes: number[], path: string
     for (const byte of entry.key) bytes.push(byte)
     for (const byte of entry.element) bytes.push(byte)
   }
+}
+
+function enter(value: object, path: string, ancestors: Set<object>): void {
+  if (ancestors.has(value)) throw new TypeError(`plan digest input at ${path} must not contain a cycle`)
+  ancestors.add(value)
 }
 
 function encodeText(value: string, bytes: number[], path: string): void {
@@ -107,7 +131,7 @@ function encodeHead(major: number, argument: number, bytes: number[]): void {
   }
 }
 
-function compareBytes(left: readonly number[], right: readonly number[]): number {
+function compareBytes(left: ArrayLike<number>, right: ArrayLike<number>): number {
   const length = Math.min(left.length, right.length)
   for (let index = 0; index < length; index += 1) {
     const delta = left[index]! - right[index]!

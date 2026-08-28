@@ -4,6 +4,7 @@ import {
   defineProtocolDeclaration,
   parseApiVersion,
   protocolFamilyKey,
+  validateApiReference,
 } from '../src/index.js'
 
 function catalog() {
@@ -180,5 +181,16 @@ describe('@dsh-std/core', () => {
     expect(parseApiVersion('connection.dsh/v2beta3')).toEqual({
       group: 'connection.dsh', major: 2, stability: 'beta', revision: 3,
     })
+  })
+
+  it('requires kind to be an ASCII identifier beginning with an uppercase letter', () => {
+    for (const kind of ['Z', 'Z2', 'ConnectionService']) {
+      expect(() => validateApiReference({ apiVersion: 'example.dsh/v1alpha1', kind })).not.toThrow()
+    }
+    for (const kind of ['', 'z', 'ä', 'Ä', 'A-B', 'A_B']) {
+      expect(() => validateApiReference({ apiVersion: 'example.dsh/v1alpha1', kind })).toThrow(
+        /protocol reference\.kind is invalid/,
+      )
+    }
   })
 })

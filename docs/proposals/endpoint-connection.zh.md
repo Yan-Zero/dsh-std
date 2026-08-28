@@ -337,7 +337,7 @@ Participant identity 不必包含 component 或 facet provenance。即使本地 
 - 选择哪个协议版本和功能子集；
 - agreement 中需要保存哪些协议专属参数。
 
-Connection 汇总协议结果，规范化排序并计算 plan digest。双方必须针对相同的 offer revision tuple 得到同一 digest，再分别接受该 plan。
+Connection 汇总协议结果，按本节规则规范化排序并计算 plan digest。双方必须针对相同的 offer revision tuple 得到同一 digest，再分别接受该 plan。
 
 ### Agreement and attachment
 
@@ -351,12 +351,24 @@ interface ConnectionAgreement {
   readonly revision: number
   readonly offers: readonly OfferRevision[]
   readonly digest: string
+  readonly compatible: boolean
   readonly protocols: readonly NegotiatedProtocol[]
+  readonly bindings: readonly CapabilityBinding[]
   readonly issues: readonly ConnectionIssue[]
 }
 ```
 
-`NegotiatedProtocol` 记录协议版本、参与者和由协议 definition 生成的 `spec`。Connection 不假定它一定是 consumer/provider binding。
+`NegotiatedProtocol` 记录协议版本、参与者和由协议 definition 生成的 `agreement`。Connection 不假定它一定是 consumer/provider binding。只有 capability-style agreement 产生顶层 `bindings`；该投影视图不改变 definition-owned agreement 的语义。
+
+Connection 必须在计算 digest 前执行以下规范化：
+
+- `offers` 必须严格包含 coordinator offer、responder offer，顺序不能交换；同一 offer 内的 declaration 顺序是该 offer 的一部分，双方必须原样保留；
+- `protocols` 必须按 `[apiVersion, kind]` 的 deterministic CBOR encoding 逐字节字典序排列；每项的 `participants` 与 `issues` 分别按其完整 deterministic CBOR encoding 排列；
+- capability binding 必须先移除尚未分配的 `bindingId`，按其余完整字段的 deterministic CBOR encoding 排列，再依次分配 `binding-1`、`binding-2`；
+- 顶层 `issues` 必须按每项完整 deterministic CBOR encoding 排列；
+- protocol definition 所有的 `agreement` 内部 array 不能由 Connection 通用重排；其顺序语义与确定性由该协议自己的规范和 conformance fixture 定义。
+
+这里的“排列”都表示比较完整 deterministic CBOR encoding 的逐字节无符号字典序，不使用 locale collation、注册顺序或 host object enumeration order。Plan digest 的字段投影、CBOR 数据模型和字符串表示由 Connection Wire Profile 规定。
 
 Plan 被双方接受后，每份 negotiated protocol 得到一个 connection-scoped attachment。Attachment 只向 agreement 中列出的本端 participant 签发，并在 plan 替换、连接关闭或 permission 撤销时失效。
 
@@ -394,7 +406,7 @@ Offer revision 在一个 endpoint view 的生命周期内单调递增。每个 r
 
 一个 connection 只有一个 negotiation coordinator。第一版由主动连接方担任，但双方独立复算 candidate plan：
 
-1. coordinator 选择双方确定 revision 的完整 offer；
+1. coordinator 选择双方确定 revision 的完整 offer，并把 offer revision tuple 固定为 `[coordinator, responder]`；
 2. 双方验证 offer 外壳和限制；
 3. 双方用同一组 protocol definitions 与显式 connection policy 计算 candidate；
 4. 双方比较 offer revision tuple、plan revision 与 digest；

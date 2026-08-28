@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog, defineProtocolDeclaration } from '@dsh-std/core'
 import { StandardEndpointRuntime, defineCapabilityProtocol, resolveConnection } from '../src/index.js'
-import { deterministicCbor, planDigest, sha256Hex } from '../src/digest.js'
+import { compareDeterministicCbor, deterministicCbor, planDigest, sha256Hex } from '../src/digest.js'
 
 const service = Object.freeze({ apiVersion: 'example.dsh/v1alpha1', kind: 'Echo' })
 
@@ -48,6 +48,16 @@ describe('plan digest', () => {
     expect(resolveConnection(first.left, first.right, { ...coordinates, protocols: protocols() }).digest).toBe(initiator.digest)
   })
 
+  it('treats the coordinator-responder offer tuple as part of plan identity', () => {
+    const { left, right } = offers()
+    const coordinates = { connectionId: 'connection-1', revision: 1 }
+    const forward = resolveConnection(left, right, { ...coordinates, protocols: protocols() })
+    const reversed = resolveConnection(right, left, { ...coordinates, protocols: protocols() })
+    expect(forward.offers.map(offer => offer.endpoint.instanceId)).toEqual(['client-1', 'host-1'])
+    expect(reversed.offers.map(offer => offer.endpoint.instanceId)).toEqual(['host-1', 'client-1'])
+    expect(reversed.digest).not.toBe(forward.digest)
+  })
+
   it('covers the full agreement: plans differing only in negotiation outcome differ in digest', () => {
     const { left, right } = offers()
     const ambiguous = new StandardEndpointRuntime({ id: 'host', instanceId: 'host-1' })
@@ -62,6 +72,44 @@ describe('plan digest', () => {
     expect(conflicted.compatible).toBe(false)
     expect(conflicted.digest).not.toBe(clean.digest)
   })
+
+  it('normalizes bindings by deterministic CBOR order rather than locale collation', () => {
+    const coordinator = new StandardEndpointRuntime({ id: 'client', instanceId: 'client-1' })
+    for (const participant of ['ä', 'z']) coordinator.register({ declaration: defineProtocolDeclaration({
+      participant: { id: participant }, requires: [service],
+    }) })
+    const responder = new StandardEndpointRuntime({ id: 'host', instanceId: 'host-1' })
+    responder.register({ declaration: defineProtocolDeclaration({
+      participant: { id: 'provider' }, supports: [service],
+    }) })
+    const plan = resolveConnection(coordinator.offer, responder.offer, {
+      connectionId: 'connection-1', revision: 1, protocols: protocols(),
+    })
+    expect(compareDeterministicCbor('z', 'ä')).toBeLessThan(0)
+    expect(plan.bindings.map(binding => binding.consumer.participantId)).toEqual(['z', 'ä'])
+    expect(plan.bindings.map(binding => binding.bindingId)).toEqual(['binding-1', 'binding-2'])
+  })
+
+  it('normalizes protocols by deterministic CBOR coordinate order', () => {
+    const services = [
+      Object.freeze({ apiVersion: 'a-a/v1', kind: 'Echo' }),
+      Object.freeze({ apiVersion: 'aa/v1', kind: 'Echo' }),
+    ] as const
+    const catalog = new ProtocolCatalog({ name: 'digest-order-test', version: '1.0.0' })
+    for (const reference of services) catalog.register(defineCapabilityProtocol(reference))
+    const coordinator = new StandardEndpointRuntime({ id: 'client', instanceId: 'client-1' })
+    coordinator.register({ declaration: defineProtocolDeclaration({
+      participant: { id: 'consumer' }, requires: services,
+    }) })
+    const responder = new StandardEndpointRuntime({ id: 'host', instanceId: 'host-1' })
+    responder.register({ declaration: defineProtocolDeclaration({
+      participant: { id: 'provider' }, supports: services,
+    }) })
+    const plan = resolveConnection(coordinator.offer, responder.offer, {
+      connectionId: 'connection-1', revision: 1, protocols: catalog,
+    })
+    expect(plan.protocols.map(protocol => protocol.apiVersion)).toEqual(['aa/v1', 'a-a/v1'])
+  })
 })
 
 describe('deterministic CBOR subset', () => {
@@ -75,14 +123,11 @@ describe('deterministic CBOR subset', () => {
       [65536, '1a00010000'],
       [4294967296, '1b0000000100000000'],
       [Number.MAX_SAFE_INTEGER, '1b001fffffffffffff'],
-      [-1, '20'],
-      [-24, '37'],
-      [-25, '3818'],
-      [-4294967297, '3b0000000100000000'],
-      [Number.MIN_SAFE_INTEGER, '3b001ffffffffffffe'],
       [true, 'f5'],
       [false, 'f4'],
       [null, 'f6'],
+      [new Uint8Array(), '40'],
+      [Uint8Array.from([1, 2, 3, 4]), '4401020304'],
       ['', '60'],
       ['IETF', '6449455446'],
       ['ü', '62c3bc'],
@@ -96,7 +141,7 @@ describe('deterministic CBOR subset', () => {
     for (const [value, expected] of vectors) expect(hex(deterministicCbor(value)), JSON.stringify(value)).toBe(expected)
   })
 
-  it('sorts map keys bytewise by their encodings, shorter keys first', () => {
+  it('sorts map keys bytewise by their deterministic encodings', () => {
     expect(hex(deterministicCbor({ aa: 1, b: 2 }))).toBe('a2616202626161' + '01')
   })
 
@@ -113,7 +158,9 @@ describe('deterministic CBOR subset', () => {
 
   it('rejects values outside the subset with the offending path', () => {
     expect(() => deterministicCbor(undefined)).toThrow(TypeError)
-    expect(() => deterministicCbor(1.5)).toThrow('must be a safe integer')
+    expect(() => deterministicCbor(-1)).toThrow('must be a non-negative safe integer')
+    expect(() => deterministicCbor({ nested: -1 })).toThrow('/nested')
+    expect(() => deterministicCbor(1.5)).toThrow('must be a non-negative safe integer')
     expect(() => deterministicCbor(Number.NaN)).toThrow(TypeError)
     expect(() => deterministicCbor(Number.MAX_SAFE_INTEGER + 1)).toThrow(TypeError)
     expect(() => deterministicCbor({ nested: { value: 2 ** 60 } })).toThrow('/nested/value')
@@ -122,6 +169,16 @@ describe('deterministic CBOR subset', () => {
     expect(() => deterministicCbor(10n)).toThrow(TypeError)
     expect(() => deterministicCbor('\ud800')).toThrow('unpaired surrogate')
     expect(() => deterministicCbor({ text: 'ok\udfff' })).toThrow('/text')
+  })
+
+  it('rejects cyclic arrays and maps with the offending path', () => {
+    const array: unknown[] = []
+    array.push(array)
+    const map: Record<string, unknown> = {}
+    map.self = map
+    expect(() => deterministicCbor(array)).toThrow('/0')
+    expect(() => deterministicCbor(array)).toThrow('must not contain a cycle')
+    expect(() => deterministicCbor(map)).toThrow('/self')
   })
 
   it('accepts null-prototype objects as maps', () => {
