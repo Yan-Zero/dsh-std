@@ -1,4 +1,4 @@
-import type { ProtocolIssue } from '@dsh-std/core'
+import type { NegotiatedProtocol, ProtocolIssue } from '@dsh-std/core'
 import {
   CONNECTION_API_VERSION,
   freezeEndpoint,
@@ -12,8 +12,19 @@ import {
   type EndpointOffer,
   type ResolveConnectionOptions,
 } from './model.js'
+import { compareDeterministicCbor, planDigest } from './digest.js'
 import { isCapabilityAgreement } from './rpc.js'
 
+/**
+ * Resolves two endpoint offers into a connection plan whose digest both parties recompute and
+ * compare before accepting the plan.
+ *
+ * Offer order is part of the plan identity: `left` MUST be the coordinator (initiator) offer and
+ * `right` the responder offer, and both parties MUST resolve with the offers in that same order.
+ * Declaration order feeds negotiation issue paths and the digest input, so swapped offers produce
+ * a plan whose digest does not compare equal. Digest-bearing result arrays are normalized by the
+ * bytewise order of their deterministic CBOR encodings rather than host locale collation.
+ */
 export function resolveConnection(left: EndpointOffer, right: EndpointOffer, options: ResolveConnectionOptions): ConnectionPlan {
   validateEndpointOffer(left)
   validateEndpointOffer(right)
@@ -29,8 +40,9 @@ export function resolveConnection(left: EndpointOffer, right: EndpointOffer, opt
     ...(options.policy === undefined ? {} : { protocol: options.policy }),
   })
   const report = options.protocols.negotiate([...left.declarations, ...right.declarations], policy)
+  const protocols = normalizeProtocols(report.protocols)
   const bindings: CapabilityBinding[] = []
-  for (const protocol of report.protocols) {
+  for (const protocol of protocols) {
     if (!isCapabilityAgreement(protocol.agreement)) continue
     for (const draft of protocol.agreement.bindings) {
       const consumer = owner.get(draft.consumer)
@@ -45,44 +57,43 @@ export function resolveConnection(left: EndpointOffer, right: EndpointOffer, opt
       }))
     }
   }
-  bindings.sort((a, b) => a.consumer.participantId.localeCompare(b.consumer.participantId)
-    || a.requirement.apiVersion.localeCompare(b.requirement.apiVersion)
-    || a.requirement.kind.localeCompare(b.requirement.kind)
-    || a.provider.participantId.localeCompare(b.provider.participantId))
+  bindings.sort((left, right) => compareDeterministicCbor(bindingSortKey(left), bindingSortKey(right)))
   const numbered = bindings.map((binding, index) => Object.freeze({ ...binding, bindingId: `binding-${String(index + 1)}` }))
-  const issues = Object.freeze(report.issues.map(row => connectionIssue(row, owner)))
+  const issues = Object.freeze(report.issues.map(row => connectionIssue(row, owner)).sort(compareDeterministicCbor))
   const coordinates = Object.freeze([
     Object.freeze({ endpoint: freezeEndpoint(left.endpoint), revision: left.revision }),
     Object.freeze({ endpoint: freezeEndpoint(right.endpoint), revision: right.revision }),
   ])
-  const digest = planDigest({ connectionId: options.connectionId, revision: options.revision, offers: coordinates, protocols: report.protocols })
-  return Object.freeze({
+  const agreement: Omit<ConnectionPlan, 'digest'> = {
     apiVersion: CONNECTION_API_VERSION,
     kind: 'ConnectionAgreement',
     connectionId: options.connectionId,
     revision: options.revision,
-    digest,
     offers: coordinates,
     compatible: report.compatible,
-    protocols: report.protocols,
+    protocols,
     bindings: Object.freeze(numbered),
     issues,
-  })
-}
-
-function planDigest(value: unknown): string {
-  const input = canonical(value)
-  let hash = 2166136261
-  for (let index = 0; index < input.length; index += 1) hash = Math.imul(hash ^ input.charCodeAt(index), 16777619)
-  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}`
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (typeof value === 'object' && value !== null) {
-    return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`
   }
-  return JSON.stringify(value)
+  return Object.freeze({ ...agreement, digest: planDigest(agreement) })
+}
+
+function bindingSortKey(binding: CapabilityBinding): Omit<CapabilityBinding, 'bindingId'> {
+  const { bindingId: _bindingId, ...key } = binding
+  return key
+}
+
+function normalizeProtocols(protocols: readonly NegotiatedProtocol[]): readonly NegotiatedProtocol[] {
+  const normalized = protocols.map(protocol => Object.freeze({
+    ...protocol,
+    participants: Object.freeze([...protocol.participants].sort(compareDeterministicCbor)),
+    issues: Object.freeze([...protocol.issues].sort(compareDeterministicCbor)),
+  }))
+  normalized.sort((left, right) => compareDeterministicCbor(
+    [left.apiVersion, left.kind],
+    [right.apiVersion, right.kind],
+  ))
+  return Object.freeze(normalized)
 }
 
 function participantOwners(left: EndpointOffer, right: EndpointOffer): Map<string, CapabilityParticipant> {

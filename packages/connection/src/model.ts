@@ -52,6 +52,7 @@ export interface ConnectionPlan {
   readonly kind: 'ConnectionAgreement'
   readonly connectionId: string
   readonly revision: number
+  /** SHA-256 over the deterministic CBOR encoding of this agreement without `digest`, as `sha256:` plus 64 lowercase hex digits. */
   readonly digest: string
   readonly offers: readonly {
     readonly endpoint: ConnectionEndpointReference

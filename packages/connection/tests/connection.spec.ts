@@ -53,7 +53,7 @@ describe('@dsh-std/connection', () => {
     })
     expect(plan).toMatchObject({
       kind: 'ConnectionAgreement', compatible: true,
-      digest: expect.stringMatching(/^fnv1a32:/),
+      digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       protocols: [{ kind: 'Echo', agreement: { kind: 'CapabilityBindings' } }],
       bindings: [{
         consumer: { participantId: 'client/consumer' },

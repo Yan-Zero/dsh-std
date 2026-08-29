@@ -125,6 +125,8 @@ interface ApiReference {
 
 `apiVersion` 由协议 group 和版本组成，`kind` 标识该 group 中的协议。二者共同确定一份版本化协议。
 
+`kind` 必须（MUST）匹配 `^[A-Z][A-Za-z0-9]*$`：它以 ASCII 大写字母开头，后续只能包含 ASCII 字母或数字。空字符串、Unicode 字母、连字号和下划线均不是合法的 Core 协议 `kind`。Evaluator 必须（MUST）在注册 definition、解析声明或查询坐标时拒绝不符合该语法的引用。
+
 Core 可以解析版本标识并建立候选集合，但不假定同一 major 下的 alpha、beta 和 stable 必然互通。精确版本之外的兼容关系由该协议的 definition 声明。没有对应 definition 时，evaluator 不能声称已经完成该协议的协商。
 
 Core 不根据 group 名称判断协议是否属于某个标准集合。命名空间归属与保留规则、协议发布状态和目录收录规则由相应治理或分发机制规定，不属于协商算法。只要坐标、definition 和声明满足本协议，evaluator 对它们采用相同的校验与协商过程。
