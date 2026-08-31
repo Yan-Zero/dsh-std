@@ -2,7 +2,6 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { createElement as h, useEffect, useState, type ReactNode } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
@@ -104,8 +103,8 @@ export const name = 'dsh-standard-browser-ui-adapter'
 export const inject = ['slots', 'locale', 'remote', 'sessions', 'modules']
 
 /** Install browser-realm surface owners in every shell using the DSH client module graph. */
-export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
-  const remote = ctx.remote as unknown as {
+export async function apply(ctx: Context): Promise<() => Promise<void>> {
+  const remote = ctx.get('remote') as unknown as {
     $mount(contribution: TypertRemoteContribution): Promise<() => Promise<void>>
   }
   const unmountRemote = await remote.$mount(DSH_STD_BROWSER_REMOTE)
@@ -310,12 +309,12 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
 export function defineDshBrowserUiFacet(input: DshBrowserUiFacetInput): {
   readonly name: string
   readonly inject: readonly [typeof FACET_HOST_SERVICE]
-  apply(ctx: ClientContext): Promise<void>
+  apply(ctx: Context): Promise<void>
 } {
   return defineBrowserUiFacet(input) as {
     readonly name: string
     readonly inject: readonly [typeof FACET_HOST_SERVICE]
-    apply(ctx: ClientContext): Promise<void>
+    apply(ctx: Context): Promise<void>
   }
 }
 
@@ -551,7 +550,7 @@ function parseStandardComponentCatalog(value: unknown): readonly StandardCompone
   }))
 }
 
-function mountStandardComponentInventory(ctx: ClientContext, remote: DshStdBrowserRemote): () => void {
+function mountStandardComponentInventory(ctx: Context, remote: DshStdBrowserRemote): () => void {
   const slots = ctx.get('slots') as unknown as SlotRuntime | undefined
   const locale = ctx.get('locale') as {
     register(namespace: string, dictionaries: Readonly<Record<string, Readonly<Record<string, string>>>>): () => void

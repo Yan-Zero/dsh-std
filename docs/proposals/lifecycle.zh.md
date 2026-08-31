@@ -87,6 +87,8 @@ Facet 的必需 requirements 若已能由现有 live supports 满足，coordinat
 
 实现代码在 activation scope 中登记实现，但 coordinator 在 `activate` 成功并完成 plan 验证前不把它们作为稳定 live support 发布。
 
+Extension publication 必须（MUST）解析到当前 facet 静态声明中的唯一 extension。实现可以使用规范化的 `metadata.name`；从 Community Manifest 投影且保留 `dsh.std/contribution-id` 的 extension，也必须（MUST）接受原始 contribution id。零匹配属于未声明 extension，多匹配属于 identity 歧义，两者都必须（MUST）使 activation 失败并回滚 staged publication。
+
 实现可以采用 staging registry，也可以在产品 registry 中登记为不可见状态。关键语义是其他组件不能在 activation 尚可能回滚时把临时 handler 当作已激活协议实现。
 
 当多个 facets 必须作为一个原子批次激活时，coordinator 在全部 activation 成功后统一越过 publication barrier。批次划分来自 composition plan，不按异步完成先后决定。

@@ -82,6 +82,43 @@ describe('@dsh-std/lifecycle', () => {
     expect(coordinator.publications.list()).toEqual([])
   })
 
+  it('publishes a projected extension by its preserved Community contribution id', async () => {
+    const protocols = new ProtocolCatalog({ name: 'test', version: '1.0.0' })
+    const manifest = defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.loop-detector', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'runtime',
+        activation: { apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint', spec: {} },
+        extensions: [{
+          apiVersion: 'commands.dsh/v1alpha1', kind: 'Command',
+          metadata: {
+            name: 'status',
+            labels: { 'dsh.std/contribution-id': 'example.loop-detector.status' },
+          },
+          spec: { title: 'Status' },
+        }],
+      }] },
+    })
+    const drivers = new ActivationDriverRegistry()
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) {
+        context.extensions.publish(
+          { apiVersion: 'commands.dsh/v1alpha1', kind: 'Command' },
+          'example.loop-detector.status',
+          { execute: true },
+        )
+      },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const [handle] = await coordinator.activate(compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() }))
+    expect(coordinator.publications.list()[0]?.extensions).toEqual([
+      expect.objectContaining({ extension: expect.objectContaining({ metadata: expect.objectContaining({ name: 'status' }) }) }),
+    ])
+    await handle?.deactivate()
+  })
+
   it('aborts the activation scope before invoking driver deactivation', async () => {
     const { protocols, manifest } = fixture()
     const drivers = new ActivationDriverRegistry()

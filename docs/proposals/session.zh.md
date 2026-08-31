@@ -74,7 +74,7 @@ Reference 用于寻址。每次调用仍检查 agreement、client scope、permis
 
 ### Session domain
 
-Catalog 与 History support 声明 `sessionDomain`。只有 domain 相同且协议协商明确接受，History 才能读取 Catalog 返回的 SessionReference。
+Catalog 与 History support 声明 `sessionDomain`。History 只有在其 agreement 选中的 provider 与 `SessionReference.provider` 相同、domain 相同且协议协商明确接受时，才能读取 Catalog 返回的 SessionReference。Domain 相同不授权另一个 participant 代替 reference owner 提供历史。
 
 Domain id 只在当前 endpoint view 中用于关联协议，不是跨安装的全局名称。
 
@@ -93,7 +93,6 @@ type SessionPageCursor = string
 interface SessionDescriptor {
   readonly session: SessionReference
   readonly title?: string
-  readonly workspace?: WorkspaceReference
   readonly state: 'available' | 'unavailable'
   readonly revision: number
   readonly createdAt?: string
@@ -107,7 +106,7 @@ interface SessionLineage {
 }
 ```
 
-`workspace` 表示 Session 创建或执行时记录的 Workspace provenance。当前分组归属由 WorkspaceSessions 表示；客户端不能把 provenance 当作 membership，也不能仅凭该字段修改 WorkspaceSessions。
+Session descriptor 不携带 Workspace membership 或 Workspace provenance。当前分组、手动顺序与归属由 `WorkspaceSessions` 独立表示；Session provider 不根据 cwd、历史字段或创建参数推断 membership。
 
 `revision` 只描述 Session descriptor。History cursor 和 Catalog revision 使用各自的版本空间，数字之间不能比较先后。
 
@@ -127,6 +126,8 @@ type SessionCatalogOperation =
 interface SessionCatalogRequirementSpec {
   readonly operations: readonly SessionCatalogOperation[]
   readonly optionalOperations?: readonly SessionCatalogOperation[]
+  readonly sessionDomain?: string
+  readonly mutationConcurrency?: 'serialized' | 'revision-checked'
 }
 
 interface SessionCatalogSupportSpec {
@@ -135,11 +136,16 @@ interface SessionCatalogSupportSpec {
   readonly mutationConcurrency: 'serialized' | 'revision-checked'
   readonly limits?: SessionCatalogLimits
 }
+
+interface SessionCatalogLimits {
+  readonly maxPageSize?: number
+  readonly maxWatchBuffer?: number
+}
 ```
 
 `operations` 中的每一项都必须由 agreement 满足。Create、rename 和 delete 均为可选能力；只读 provider 可以只发布 list、get 和 watch。
 
-`serialized` Provider 按接纳顺序提交 mutation，不接受 revision precondition。`revision-checked` Provider 可以在同一 mutation 临界区校验 `expectedRevision`。Requirement 只有显式要求 `revision-checked` 时才排除 serialized provider。
+`serialized` Provider 按接纳顺序提交 mutation，不接受 revision precondition；收到 `expectedRevision` 必须拒绝请求。`revision-checked` Provider 可以在同一 mutation 临界区校验 `expectedRevision`。Requirement 只有显式要求 `revision-checked` 时才排除 serialized provider。
 
 ### List
 
@@ -160,6 +166,8 @@ List 返回当前 client scope 可见的 Session。默认顺序为 `createdAt` �
 
 Page cursor 不透明，并绑定 provider、client scope、order 和 catalog revision。Client 不能修改、拼接或跨 agreement 复用 cursor。
 
+Provider 返回的 sessions 数量不得超过请求的 `limit` 或 agreement 的 `maxPageSize`，取两者中较小者。
+
 目录在分页期间发生变化时，Provider 保持原 snapshot，或返回 catalog-invalidated；不能在同一次分页中静默混合两个 revision。
 
 按 Workspace 分组或筛选时，client 使用 WorkspaceSessions 的 membership snapshot；SessionCatalog 不用 cwd 或 descriptor provenance 猜测当前分组。
@@ -172,7 +180,6 @@ Get 按 SessionReference 返回当前 descriptor。Reference 属于其他 provid
 
 ```ts
 interface CreateSessionInput {
-  readonly workspace?: WorkspaceReference
   readonly title?: string
   readonly requestId: string
 }
@@ -186,7 +193,7 @@ Create 建立一份空的持久 Session，不隐含创建或启动 Agent。Provi
 
 `requestId` 在当前 client scope 内提供幂等重试。相同 request id 与相同输入返回同一结果；相同 id 与不同输入返回 conflict。
 
-Create 接受 WorkspaceReference 时，Provider 验证 domain 和 permission，并与 WorkspaceSessions provider 原子建立所要求的归属，或整体失败。不能返回一份声称属于 Workspace、但归属提交已经失败的 descriptor。
+Create 不接受 WorkspaceReference，也不隐式建立 Workspace membership。需要归属的 client 必须（MUST）先协商具有相容 `sessionDomain` 的 `WorkspaceSessions` agreement，再显式调用 attach。这是两次独立提交，不构成跨协议事务；attach 失败时，client 必须保留已创建 Session 的 reference 以便重试、显示或执行经授权的补偿。
 
 ### Rename
 
@@ -200,7 +207,7 @@ interface RenameSessionInput {
 
 Title 去除首尾空白后必须非空。Rename 修改 Session 显示标题，不改变历史内容、Workspace membership 或 Agent 状态。
 
-`expectedRevision` 只在 `revision-checked` agreement 中有效。Provider 可以把 rename 表示为自身历史中的事件，也可以更新独立元数据；两种实现必须产生相同的 Catalog 和 History 可观察结果。
+`expectedRevision` 只在 `revision-checked` agreement 中有效。Provider 可以把 rename 表示为自身历史中的事件，也可以只更新独立元数据；两种实现必须产生相同的 Catalog 可观察结果。`v1alpha1` 不要求 History 包含 rename event；Provider 如果记录该事件，必须按照 SessionEvent vocabulary 将它作为额外的持久事实公开。
 
 ### Delete
 
@@ -208,6 +215,10 @@ Title 去除首尾空白后必须非空。Rename 修改 Session 显示标题，�
 interface DeleteSessionInput {
   readonly session: SessionReference
   readonly expectedRevision?: number
+}
+
+interface DeleteSessionResult {
+  readonly deleted: boolean
 }
 ```
 
@@ -219,9 +230,28 @@ Provider 在删除前终止相应 History follow。活动 Agent 仍引用该 Ses
 
 ### Watch
 
-Catalog watch 从调用时的一份 snapshot revision 开始，产生 session-created、descriptor-changed、session-deleted 和 catalog-invalidated event。
+Catalog watch 从调用时的目录 revision 开始，产生 session-created、descriptor-changed、session-deleted 和 catalog-invalidated event。Client 可以用 list 返回的 revision 衔接分页 snapshot 与后续变化。
 
-Event 包含前后 catalog revision。出现 revision 空洞或 invalidated 后，client 重新调用 list；Catalog watch 不携带 Session 历史事件。
+```ts
+interface WatchSessionCatalogInput {
+  readonly afterRevision?: number
+}
+
+type SessionCatalogEvent =
+  | { readonly type: 'session-created' | 'descriptor-changed'; readonly beforeRevision: number; readonly afterRevision: number; readonly session: SessionDescriptor }
+  | { readonly type: 'session-deleted'; readonly beforeRevision: number; readonly afterRevision: number; readonly session: SessionReference }
+  | { readonly type: 'catalog-invalidated'; readonly beforeRevision: number; readonly afterRevision: number }
+
+type SessionCatalogWatchProgress =
+  | { readonly type: 'ready'; readonly catalogRevision: number }
+  | { readonly type: 'event'; readonly event: SessionCatalogEvent }
+```
+
+Watch 的第一帧必须（MUST）是 `ready`，其中 `catalogRevision` 是订阅建立时的当前 revision；后续帧才可以是 `event`。指定 `afterRevision` 时，Provider 在 ready 后先发送 `(afterRevision, catalogRevision]` 内保留的变化，再发送新的变化；无法从该 revision 连续重放时，调用必须以 catalog-invalidated 错误失败。省略它时，只发送 ready revision 之后的新变化。
+
+每个 event 的 `beforeRevision` 必须等于上一帧确定的 revision，`afterRevision` 必须增大。出现 revision 空洞或 `catalog-invalidated` 后，Provider 必须终止 stream，client 重新调用 list。Catalog watch 不携带 Session 历史事件。
+
+Watch 是长调用；Connection `result` 只在 stream 结束时 resolve，因此实现不得把 ready revision 放在最终 result 中。它必须通过首个 `ready` progress 帧交付。Ready 只建立 revision cut，不复制可能无界的完整 Catalog snapshot。
 
 ## `SessionHistory`
 
@@ -236,12 +266,20 @@ type SessionHistoryOperation =
 interface SessionHistoryRequirementSpec {
   readonly operations: readonly SessionHistoryOperation[]
   readonly optionalOperations?: readonly SessionHistoryOperation[]
+  readonly sessionDomain?: string
 }
 
 interface SessionHistorySupportSpec {
   readonly sessionDomain: string
   readonly operations: readonly SessionHistoryOperation[]
   readonly limits?: SessionHistoryLimits
+}
+
+interface SessionHistoryLimits {
+  readonly maxPageEvents?: number
+  readonly maxEventBytes?: number
+  readonly maxFollowBuffer?: number
+  readonly maxForkEvents?: number
 }
 ```
 
@@ -288,6 +326,8 @@ interface SessionHistoryPage {
 
 `after` 和 `before` 为开区间边界。省略边界时，forward 从历史开头读取，backward 从历史末尾读取。返回 events 始终按历史正序排列，使客户端不必因翻页方向反转 event 语义。
 
+Provider 返回的 events 数量不得超过请求的 `limit` 或 agreement 的 `maxPageEvents`，取两者中较小者。
+
 Cursor 不存在、属于其他 Session 或已因 provider 明确的 retention policy 失效时返回 cursor-invalid，不得静默从开头继续。
 
 Read 是持久历史 snapshot，不包含尚未由 Session provider提交的 Agent stream delta。
@@ -296,7 +336,20 @@ Read 是持久历史 snapshot，不包含尚未由 Session provider提交的 Age
 
 Follow 从指定 cursor 之后观察新提交的 event。省略 cursor 表示从订阅建立时的末尾开始，只接收之后的提交；需要完整历史的 client 先 read，再用最后 cursor 建立 follow。
 
-Follow 的首个 acknowledgment 返回当前 boundary cursor，消除 read 与订阅之间的竞态。Provider 保证 boundary 之后的每个已提交 event 要么出现在 stream 中，要么以 history-invalidated 终止 stream。
+```ts
+interface FollowSessionHistoryInput {
+  readonly session: SessionReference
+  readonly after?: SessionCursor
+}
+
+type SessionHistoryFollowProgress =
+  | { readonly type: 'ready'; readonly session: SessionReference; readonly boundary?: SessionCursor }
+  | { readonly type: 'event'; readonly event: SessionEventEnvelope }
+```
+
+Follow 的第一帧必须（MUST）是 `ready`，其中 `boundary` 是订阅建立时已提交历史的末端 cursor；空历史可以省略 boundary。指定 `after` 时，Provider 在 ready 后依次发送 `(after, boundary]` 内尚未读取的 event，再发送 boundary 之后的新提交，因此 read 与订阅之间不会产生空洞。省略 `after` 时，Provider 从 ready boundary 之后的新提交开始发送。
+
+后续每一帧必须是 `event`，且属于请求中的同一 Session。Connection `result` 只在 stream 结束时 resolve；Provider 不得用最终 result 充当 ready acknowledgment。
 
 背压超过 agreement 限制、Session 删除、permission 撤销或 history incarnation 改变时，stream 明确关闭。Client 重新 read；Provider 不无限缓存。
 
@@ -306,16 +359,19 @@ Follow 的首个 acknowledgment 返回当前 boundary cursor，消除 read 与�
 interface ForkSessionInput {
   readonly source: SessionReference
   readonly through: SessionCursor
-  readonly workspace?: WorkspaceReference
   readonly requestId: string
+}
+
+interface ForkSessionResult {
+  readonly session: SessionDescriptor
 }
 ```
 
 Fork 创建一份新的 Session，其语义状态等于 source 重放至 `through` event 后的状态。它不截断或修改 source。
 
-Required event 无法解释、cursor 不在 source 中或目标 Workspace 不相容时整体失败。Provider 可以用 copy-on-write、结构共享或物理复制实现；存储方式不改变结果。
+Required event 无法解释或 cursor 不在 source 中时整体失败。Provider 可以用 copy-on-write、结构共享或物理复制实现；存储方式不改变结果。
 
-Fork result 的 descriptor 记录 lineage。`requestId` 使用与 Catalog create 相同的幂等规则。新 Session 的 Workspace 归属必须与 Session 创建原子提交。
+Fork result 的 descriptor 记录 lineage。`requestId` 使用与 Catalog create 相同的幂等规则。Fork 不复制或创建 Workspace membership；client 只能通过独立的 `WorkspaceSessions.attach` 建立新归属。
 
 History 协议不定义“按屏幕中的第几行 rewind”。UI 负责把选中的可重放位置对应到 SessionCursor，再调用 fork。
 
@@ -323,7 +379,7 @@ History 协议不定义“按屏幕中的第几行 rewind”。UI 负责把选�
 
 `v1alpha1` 不向普通 History client 提供任意 append。能够读取 Session 或声明 SessionEvent resource，不表示能够伪造 Agent、tool、permission 或其他组件拥有的事件。
 
-Session runtime 可以在本地向已授权组件提供更窄的 writer facade。Writer 必须绑定 event owner、Session scope 和允许的 event types；该 facade不是 SessionHistory client 的隐含成员。
+Session runtime 可以在本地向已授权组件提供更窄的 writer facade。Writer 必须绑定 event owner、Session incarnation、允许的 event type、replay 分类、validator、permission、payload limit、request id 幂等规则和 activation lifecycle；该 facade 不是 SessionHistory client 的隐含成员。
 
 ## `SessionEvent`
 
@@ -354,7 +410,7 @@ interface SessionEventSpec {
 }
 ```
 
-`metadata.name` 是 event envelope 的 type。`payloadSchema` 是不可执行 schema 数据，不包含 validator 或 callback。存在 schema 时，`schemaDialect` 必须明确标识 dialect；未知 dialect 不能被当作校验成功。
+`metadata.name` 是 event envelope 的 type。`payloadSchema` 是不可执行 schema 数据，不包含 validator 或 callback。新声明如果提供 schema，应该（SHOULD）用 `schemaDialect` 明确标识 dialect。为兼容既有 `v1alpha1` resource，缺少 dialect 的 schema 仍必须被接受，但 consumer 只能把它当作不透明说明，不能声称校验成功；未知 dialect 采用相同处理。
 
 ### Replay
 
@@ -385,20 +441,18 @@ Catalog watch 与 History follow 使用独立 attachment 和背压。一个 stre
 
 ## Errors
 
-协议错误至少区分：
+协议定义以下稳定 error code；transport 可以为它们提供语言专用的 error class，但不得改写 code：
 
-- provider 或 session domain 不匹配；
-- Session 不存在、不可用或仍由活动 Agent 使用；
-- operation 未协商；
-- page cursor、event cursor 或 lineage cursor 无效；
-- catalog、descriptor 或 history 已失效；
-- unknown required event 阻止重放或 fork；
-- WorkspaceReference 不相容；
-- title、filter 或 request 无效；
-- revision conflict；
-- permission 或 disclosure policy 拒绝；
-- stream flow control exceeded；
-- provider unavailable 或持久提交失败。
+- `REFERENCE_MISMATCH`：provider、session domain 或 agreement 不匹配；
+- `SESSION_NOT_FOUND`、`SESSION_UNAVAILABLE`、`SESSION_IN_USE`：Session 生命周期状态不允许操作；
+- `OPERATION_NOT_NEGOTIATED`：operation 未协商；
+- `PAGE_CURSOR_INVALID`、`EVENT_CURSOR_INVALID`、`LINEAGE_CURSOR_INVALID`：相应 cursor 无效；
+- `CATALOG_INVALIDATED`、`DESCRIPTOR_INVALIDATED`、`HISTORY_INVALIDATED`：相应 snapshot 或 stream 已失效；
+- `UNKNOWN_REQUIRED_EVENT`：未知 required event 阻止重放或 fork；
+- `INVALID_REQUEST`、`REVISION_CONFLICT`：输入或并发前置条件不成立；
+- `PERMISSION_NOT_GRANTED`：permission 或 disclosure policy 拒绝；
+- `FLOW_CONTROL_EXCEEDED`：stream 超过协商的流控限制；
+- `PROVIDER_UNAVAILABLE`、`COMMIT_FAILED`：provider 不可用或持久提交失败。
 
 错误保留稳定 code 和结构化 detail。日志路径、数据库 key、未裁剪 event payload、credential 和产品 stack 不直接进入远端 detail。
 
@@ -421,7 +475,8 @@ Catalog watch 与 History follow 使用独立 attachment 和背压。一个 stre
 - Agent 可以创建、附着或写入 Session，但 AgentReference 与 SessionReference 不等价；
 - WorkspaceSessions 拥有 Session 的分组归属与手动顺序；
 - Content 提供持久事件引用的文本外内容；
-- Events 处理进程内 live event point 与 interception，不替代持久 SessionHistory；
+- 已提交的 Session event 只能通过 SessionHistory read/follow 观察；实现不得再把同一 durable fact 镜像成另一套无 cursor 的通用 event stream；
+- 领域运行时中尚未提交为 Session history 的 transient observation 不是 SessionHistory，并且不能声称可补读或可重放；
 - Permission 决定目录、历史、mutation 和 event payload 的实际可见性。
 
 ## Rationale and alternatives

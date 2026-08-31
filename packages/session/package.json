@@ -1,19 +1,28 @@
 {
   "name": "@dsh-std/session",
-  "version": "0.1.1-rc.1",
+  "version": "0.1.1-rc.2",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/session" },
   "publishConfig": { "access": "public" },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./catalog": { "types": "./lib/catalog.d.ts", "default": "./lib/catalog.js" },
+    "./history": { "types": "./lib/history.d.ts", "default": "./lib/history.js" },
+    "./events": { "types": "./lib/events.d.ts", "default": "./lib/events.js" }
+  },
   "files": ["lib", "CHANGELOG.md"],
   "scripts": {
     "build": "pnpm run typecheck && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
-  "dependencies": { "@dsh-std/manifest": "workspace:^" },
+  "dependencies": {
+    "@dsh-std/connection": "workspace:^",
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/manifest": "workspace:^"
+  },
   "engines": { "node": "^22.19 || >=24" }
 }

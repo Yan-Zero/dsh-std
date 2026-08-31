@@ -13,6 +13,7 @@ export const COMMUNITY_V015_MANIFEST_VERSION = '0.15'
 export const COMPONENT_API_VERSION = 'manifest.dsh/internal/v1alpha1'
 export const COMMUNITY_PERMISSION_API_VERSION = 'community.dsh/v1alpha1'
 export const COMMUNITY_PERMISSION_KIND = 'Permission'
+export const COMMUNITY_CONTRIBUTION_ID_LABEL = 'dsh.std/contribution-id'
 
 const COMPONENT_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)+$/u
 const LOCAL_NAME = /^[a-z][a-z0-9]*(?:[.-][a-z0-9][a-z0-9-]*)*$/u
@@ -326,7 +327,7 @@ function projectCommunityManifest(manifest: CommunityPluginManifestV015): Compon
     kind: 'Command',
     metadata: Object.freeze({
       name: localContributionName(row.id),
-      labels: Object.freeze({ 'dsh.std/contribution-id': row.id }),
+      labels: Object.freeze({ [COMMUNITY_CONTRIBUTION_ID_LABEL]: row.id }),
     }),
     spec: Object.freeze({
       title: row.title,
@@ -347,7 +348,7 @@ function projectCommunityManifest(manifest: CommunityPluginManifestV015): Compon
         kind: contribution.kind,
         metadata: Object.freeze({
           name: contribution.name,
-          labels: Object.freeze({ 'dsh.std/contribution-id': contribution.id }),
+          labels: Object.freeze({ [COMMUNITY_CONTRIBUTION_ID_LABEL]: contribution.id }),
         }),
         spec: contribution.spec,
       }))
@@ -400,6 +401,12 @@ export function facetIdentity(manifest: ComponentManifest, facet: ComponentFacet
 
 export function facetKey(identity: FacetIdentity): string {
   return `${identity.component}@${identity.version}#${identity.facet}`
+}
+
+/** Match either the normalized extension name or its preserved Community contribution id. */
+export function matchesExtensionPublicationName(extension: ManifestExtension, name: string): boolean {
+  return extension.metadata.name === name
+    || extension.metadata.labels?.[COMMUNITY_CONTRIBUTION_ID_LABEL] === name
 }
 
 export function findFacet(manifest: ComponentManifest, name: string): ComponentFacet | undefined {

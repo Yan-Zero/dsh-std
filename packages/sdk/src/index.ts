@@ -59,7 +59,9 @@ export function defineProtocolKey<Client>(
 export function protocol<Client>(context: ActivationContext, key: ProtocolKey<Client>): Client {
   assertProtocolKey(key)
   const agreement = context.protocols.agreement(key)
-  if (agreement === undefined) throw new Error(`required protocol ${key.apiVersion} ${key.kind} is unavailable`)
+  if (agreement === undefined || context.protocols.client(key) === undefined) {
+    throw new Error(`required protocol ${key.apiVersion} ${key.kind} is unavailable`)
+  }
   return key.fromAgreement(agreement, context)
 }
 
@@ -69,7 +71,7 @@ export function optionalProtocol<Client>(
 ): { readonly available: true; readonly client: Client } | { readonly available: false } {
   assertProtocolKey(key)
   const agreement = context.protocols.agreement(key)
-  return agreement === undefined
+  return agreement === undefined || context.protocols.client(key) === undefined
     ? Object.freeze({ available: false })
     : Object.freeze({ available: true, client: key.fromAgreement(agreement, context) })
 }

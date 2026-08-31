@@ -9,7 +9,11 @@ import {
   type ProtocolSupport,
 } from '@dsh-std/core'
 import type { CompositionPlan, SelectedFacet } from '@dsh-std/composition'
-import type { ActivationObject, ManifestExtension } from '@dsh-std/manifest'
+import {
+  matchesExtensionPublicationName,
+  type ActivationObject,
+  type ManifestExtension,
+} from '@dsh-std/manifest'
 
 export type LifecycleState = 'planned' | 'activating' | 'active' | 'deactivating' | 'inactive' | 'failed'
 
@@ -337,8 +341,11 @@ export class LifecycleCoordinator {
 
   private stageExtension<T>(instance: MutableInstance, reference: ApiReference, name: string, handler: T): () => void {
     if (instance.state !== 'activating') throw new Error('extension handlers can only be staged during activation')
-    const extension = (instance.selected.facet.extensions ?? []).find(row => sameProtocol(row, reference) && row.metadata.name === name)
-    if (extension === undefined) throw new TypeError(`facet attempted to publish undeclared extension ${reference.apiVersion} ${reference.kind} ${name}`)
+    const candidates = (instance.selected.facet.extensions ?? []).filter(row =>
+      sameProtocol(row, reference) && matchesExtensionPublicationName(row, name))
+    if (candidates.length === 0) throw new TypeError(`facet attempted to publish undeclared extension ${reference.apiVersion} ${reference.kind} ${name}`)
+    if (candidates.length > 1) throw new TypeError(`facet extension publication name ${JSON.stringify(name)} is ambiguous`)
+    const extension = candidates[0]!
     if (instance.extensions.some(row => row.extension === extension)) throw new TypeError(`facet already staged extension ${name}`)
     const row: ExtensionPublication = Object.freeze({ extension, handler })
     instance.extensions.push(row)

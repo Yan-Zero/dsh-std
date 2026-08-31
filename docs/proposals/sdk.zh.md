@@ -86,6 +86,8 @@ if (presentation.available) await presentation.client.open(uri)
 
 SDK 不为缺失可选协议注入会在首次调用时才崩溃的占位实现。
 
+协商报告中出现协议坐标不等于当前 activation instance 已取得可调用能力。`optionalProtocol()` 必须（MUST）同时确认该 requirement 存在协商结果，并且产品 backend 已为当前 activation scope 签发 live client；任一条件不满足时返回 `{ available: false }`，且不得调用 typed key 的 `fromAgreement`。`protocol()` 采用相同判定，但对不可用的必需协议抛出激活错误。
+
 ### Ownership and cleanup
 
 SDK 创建的 registration 全部绑定 activation instance lifecycle scope。Protocol implementation、extension handler、event handler、timer、task 和 connection attachment 都返回 disposer，并自动登记 owner。

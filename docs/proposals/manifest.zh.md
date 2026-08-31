@@ -115,6 +115,8 @@ interface CommunityContractReference extends ApiReference {
 - `compat`、`overrides` 和其他已声明的安装信息进入 admission 或 provenance，不产生 live support；
 - 该版本没有 potential support 声明时，不为 facet 补造 `protocols.supports`。
 
+Community contribution 的 `id` 是源 Manifest 中的完整 contribution identity。投影器为了满足领域协议的名称语法，可以（MAY）为 `metadata.name` 选择确定性的局部名称；此时必须（MUST）在 `dsh.std/contribution-id` label 中保留原始 `id`。Activation publication 使用局部 `metadata.name` 或该完整 contribution id 均必须（MUST）解析到同一项静态 extension。若一个输入同时匹配多项 extension，Host 必须（MUST）以歧义错误拒绝 publication，不得按声明顺序选择。
+
 通过 Manifest schema 只证明文件结构有效。Host 是否能够激活插件，仍取决于 activation API、required protocols、permission policy 和领域实现。
 
 ### Projection result

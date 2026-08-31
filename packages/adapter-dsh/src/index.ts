@@ -64,7 +64,6 @@ import {
   extensionDefinition as commandExtensionDefinition,
   register as registerCommand,
   resourceSupport as commandResourceSupport,
-  runtimeSupport as commandRuntimeSupport,
   type CommandCatalog,
   type CommandDescriptor,
   type CommandExecution,
@@ -75,7 +74,6 @@ import {
   API_VERSION as MODEL_API_VERSION,
   CATALOG_KIND as MODEL_CATALOG_KIND,
   PROVIDER_KIND as MODEL_PROVIDER_KIND,
-  catalogSupport as modelCatalogSupport,
   modelCatalogImplementation,
   providerExtensionDefinition,
   register as registerModel,
@@ -116,6 +114,12 @@ import {
   EVENT_KIND as SESSION_EVENT_KIND,
   eventExtensionDefinition as sessionEventExtensionDefinition,
 } from '@dsh-std/session'
+import { registerSessionCatalog } from '@dsh-std/session/catalog'
+import { registerSessionHistory } from '@dsh-std/session/history'
+import {
+  DshSessionProtocolAdapter,
+  type DshSessionControllerFace,
+} from './session-adapter.js'
 import {
   API_VERSION as PRESENTATION_API_VERSION,
   presentationClients,
@@ -623,6 +627,7 @@ class DshToolOverrideRegistry {
 class DshSessionEventRegistry {
   private readonly owned = new Map<string, number>()
   private readonly writers = new Map<string, Map<string, number>>()
+  private readonly replay = new Map<string, 'required' | 'ignorable'>()
   private readonly vocabulary: Set<string>
 
   constructor() {
@@ -632,7 +637,12 @@ class DshSessionEventRegistry {
     this.vocabulary = KNOWN_SESSION_EVENT_TYPES as Set<string>
   }
 
-  register(type: string, owner: string): () => void {
+  register(type: string, owner: string, replay: 'required' | 'ignorable'): () => void {
+    const existingReplay = this.replay.get(type)
+    if (existingReplay !== undefined && existingReplay !== replay) {
+      throw new Error(`session event ${JSON.stringify(type)} was declared with conflicting replay classifications`)
+    }
+    this.replay.set(type, replay)
     const count = this.owned.get(type) ?? 0
     this.owned.set(type, count + 1)
     const types = this.writers.get(owner) ?? new Map<string, number>()
@@ -657,6 +667,12 @@ class DshSessionEventRegistry {
       // every observed event type recognizable for the rest of this process,
       // including across hot reload and activation rollback.
     }
+  }
+
+  replayOf(type: string): 'required' | 'ignorable' {
+    // Product-native events have no portable SessionEvent resource. A standard
+    // reader may retain them, but cannot be required to interpret DSH internals.
+    return this.replay.get(type) ?? 'ignorable'
   }
 
   append(
@@ -906,7 +922,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export class DshStandardAdapter extends TypertRemoteService {
-  static inject = ['agents', 'llm']
+  static inject = ['agents', 'llm', 'sessionController']
   static Config = z.object({
     profile: z.string(),
     profileBaseUrl: z.string(),
@@ -930,6 +946,7 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly activeEntrypoints = new Map<string, ActiveEntrypoint>()
   private readonly toolOverrides: DshToolOverrideRegistry
   private readonly sessionEvents = new DshSessionEventRegistry()
+  private readonly sessionProtocols: DshSessionProtocolAdapter
   private readonly commandExtensions: DshCommandExtensionRegistry
   private readonly commandProviderDisposers = new Set<() => void>()
   private readonly uiProviders = new Map<string, UiContributionProvider>()
@@ -941,6 +958,13 @@ export class DshStandardAdapter extends TypertRemoteService {
     super(ctx, 'dshStd', { namespace: DSH_STD_NAMESPACE })
     this.selfCtx = ctx
     this.toolOverrides = new DshToolOverrideRegistry(ctx, this.sessionEvents)
+    const sessionController = ctx.get('sessionController') as unknown as DshSessionControllerFace | undefined
+    if (sessionController === undefined) throw new Error('DSH standard adapter requires sessionController')
+    this.sessionProtocols = new DshSessionProtocolAdapter(
+      ADAPTER_PARTICIPANT,
+      sessionController,
+      type => this.sessionEvents.replayOf(type),
+    )
     registerToolComposition(this.compositionRules)
     const instanceId = randomUUID()
     // A Loader entry's scoped context is anchored at the package that owns the
@@ -950,23 +974,24 @@ export class DshStandardAdapter extends TypertRemoteService {
     const profileBaseUrl = config.profileBaseUrl?.trim() || ctx.baseUrl
     const profile = config.profile?.trim() || profileFromBaseUrl(profileBaseUrl)
     this.commandExtensions = new DshCommandExtensionRegistry()
+    const implementations = this.standardImplementations()
     const declaration = defineProtocolDeclaration({
       participant: { id: ADAPTER_PARTICIPANT },
-      supports: [commandResourceSupport, commandRuntimeSupport, modelCatalogSupport],
+      supports: [commandResourceSupport, ...implementations.map(implementation => implementation.protocol)],
     })
     this.runtime = Object.freeze({
       id: config.runtimeId?.trim() || 'dsh', instanceId,
       ...(profile === undefined ? {} : { profile }), declaration,
     })
     this.connectionEndpoint = new StandardEndpointRuntime({ id: this.runtime.id, instanceId })
-    this.connectionEndpoint.register({ declaration, implementations: this.standardImplementations() })
+    this.connectionEndpoint.register({ declaration, implementations })
     this.publications.publish({
       identity: Object.freeze({
         component: ADAPTER_COMPONENT, version: '0.1.0', facet: 'runtime',
         instanceId: `${instanceId}:runtime`, participantId: ADAPTER_PARTICIPANT,
       }),
       declaration,
-      protocols: Object.freeze(this.standardImplementations().map(implementation => Object.freeze({
+      protocols: Object.freeze(implementations.map(implementation => Object.freeze({
         support: implementation.protocol, implementation,
       }))),
       extensions: Object.freeze([]),
@@ -1558,7 +1583,12 @@ export class DshStandardAdapter extends TypertRemoteService {
           ))
         }
         if (sameProtocol(extension, { apiVersion: SESSION_API_VERSION, kind: SESSION_EVENT_KIND })) {
-          disposers.push(this.sessionEvents.register(extension.metadata.name, publication.identity.component))
+          const replay = (extension.spec as { readonly replay: 'required' | 'ignorable' }).replay
+          disposers.push(this.sessionEvents.register(
+            extension.metadata.name,
+            publication.identity.component,
+            replay,
+          ))
         }
       }
     } catch (error) {
@@ -1633,6 +1663,7 @@ export class DshStandardAdapter extends TypertRemoteService {
         list: () => this.modelCatalog(),
         get: async input => (await this.modelCatalog()).providers.find(provider => provider.resource.metadata.name === input.name),
       }),
+      ...this.sessionProtocols.implementations,
     ])
   }
 
@@ -1653,6 +1684,8 @@ export function createDshProtocolCatalog(): ProtocolCatalog {
   registerPresentation(catalog)
   registerStorage(catalog)
   registerWorkspace(catalog)
+  registerSessionCatalog(catalog)
+  registerSessionHistory(catalog)
   registerUi(catalog)
   return catalog
 }

@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/sdk` are recorded here.
 
+## 0.1.1-rc.2
+
+- Require both a negotiated protocol row and a live activation-scoped client before `protocol()` or `optionalProtocol()` calls `fromAgreement`; optional requirements with no binding now return `{ available: false }`.
+
 ## 0.1.1-rc.1
 
 - Aligned the package with the workspace `0.1.1` prerelease line without changing the existing SDK contract.

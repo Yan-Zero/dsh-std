@@ -1,5 +1,7 @@
 # `@dsh-std/session`
 
-本包定义会话领域的静态扩展。`SessionEvent` 声明一种由组件拥有的持久事件类型；产品 adapter 将该声明注册到实际的会话存储实现。adapter 一旦见过某种持久事件，就会在当前进程余下生命周期内持续识别它，避免 facet 热重载或卸载后已有记录变得不可读。
+本包定义 provider-scoped Session identity 和三个可独立使用的协议面。`SessionCatalog` 列出并管理 descriptor，`SessionHistory` 读取、跟随和 fork 持久历史，`SessionEvent` 声明一种由组件拥有的持久事件类型。
 
-它不定义通用事件总线。观察和拦截运行中操作仍属于 `@dsh-std/events`；事件的持久化、重放与未知类型处理属于 session 领域。
+Catalog 与 History 是分离的 capability，因此元数据访问不会授予历史访问。Workspace membership 仍由 `@dsh-std/workspace` 拥有；Session create 和 fork 不隐式 attach Workspace。
+
+本包不是全局事件总线。持久 Session fact 只有一个观察面：带 provider cursor 和 replay 语义的 `SessionHistory.read()` / `follow()`。普通 History client 不能任意 append event。

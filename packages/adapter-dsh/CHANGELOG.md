@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1-rc.2
+
+- Adapted the Host and browser integration to the DeepSeek Harness `0.1.2-alpha.2` API split, replacing the removed client-runtime dependency with API Gateway and Session Controller services and recognizing namespaced Remote error codes.
+- Published DSH Sessions through standard `SessionCatalog` list/get/create/rename and `SessionHistory` read/follow capabilities, with stable catalog pages and gap-free history follow.
+- Preserved component-declared SessionEvent replay classification while treating product-native DSH events as portable-but-ignorable implementation details.
+
 ## 0.1.1-rc.1
 
 - Discover browser `LocalModule` facets from standard manifests and project them through the adapter-owned DSH client module and Cordis lifecycle, without requiring a component root Loader entry.

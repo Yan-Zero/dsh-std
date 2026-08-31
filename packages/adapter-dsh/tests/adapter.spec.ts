@@ -159,6 +159,23 @@ async function fixture(
   }
   ctx.provide('agents', { get: (id: string) => id === 'session-1' ? agent : undefined } as never)
   ;(ctx.get('agents') as unknown as { list?: () => unknown[] }).list = () => [agent]
+  ctx.provide('sessionController', {
+    list: async () => ({ items: [{ sessionId: 'session-1' }] }),
+    inspect: async (id: string) => {
+      if (id !== 'session-1') {
+        throw Object.assign(new Error('not found'), { failure: { code: 'session-not-found' } })
+      }
+      return {
+        meta: { id: 'session-1', createdAt: 1 },
+        events: events.map((event, seq) => ({ ...event, seq, time: seq + 2 })),
+      }
+    },
+    create: async ({ sessionId }: { sessionId?: string }) => ({ sessionId: sessionId ?? 'session-created' }),
+    rename: async ({ title }: { title: string }) => ({ title, seq: events.length }),
+    follow: async function *() {
+      yield { type: 'snapshot' as const, cursor: events.length - 1 }
+    },
+  } as never)
   ctx.provide('tools', tools as never)
   await ctx.plugin(CommandRuntime)
   const adapter = new DshStandardAdapter(ctx, { profile })
@@ -362,16 +379,33 @@ describe('@dsh-std/adapter-dsh', () => {
       facets: { host: { entry: 'dist/host.js', apiVersion: 'v1alpha1' } },
       requires: { contracts: [{ apiVersion: 'commands.dsh/v1alpha1', kind: 'Command' }] },
       permissions: [],
-      contributes: { commands: [] },
+      contributes: { commands: [{
+        id: 'example.community.component.status',
+        title: 'Community status',
+      }] },
       subscriptions: [],
     }))
-    writeFileSync(join(componentDir, 'dist', 'host.js'), 'export default { activate() {} }\n')
+    writeFileSync(join(componentDir, 'dist', 'host.js'), `export default {
+      activate(context) {
+        context.extensions.publish(
+          { apiVersion: 'commands.dsh/v1alpha1', kind: 'Command' },
+          'example.community.component.status',
+          { execute() { return { kind: 'success', text: 'community status' } } },
+        )
+      },
+    }\n`)
 
     const disposers = await adapter.mountProfileComponents(profileDir)
     expect((await adapter.snapshot()).facets).toEqual(expect.arrayContaining([
       expect.objectContaining({ identity: expect.objectContaining({
         component: 'example.community.component', facet: 'host',
       }) }),
+    ]))
+    expect(adapter.catalog('session-1', undefined).commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'status',
+        resource: expect.objectContaining({ metadata: expect.objectContaining({ name: 'status' }) }),
+      }),
     ]))
     for (const dispose of disposers) await dispose()
   })
@@ -490,6 +524,13 @@ export default {
     // profileBaseUrl in the root profile context before that scope is created.
     ctx.baseUrl = pathToFileURL(`${join(profileDir, 'node_modules', '@dsh-std', 'adapter-dsh')}/`).href
     ctx.provide('agents', { get: () => undefined, list: () => [] } as never)
+    ctx.provide('sessionController', {
+      list: async () => ({ items: [] }),
+      inspect: async () => { throw Object.assign(new Error('not found'), { failure: { code: 'session-not-found' } }) },
+      create: async ({ sessionId }: { sessionId?: string }) => ({ sessionId: sessionId ?? 'created' }),
+      rename: async ({ title }: { title: string }) => ({ title, seq: 0 }),
+      follow: async function *() { yield { type: 'snapshot' as const, cursor: -1 } },
+    } as never)
     await ctx.plugin(CommandRuntime)
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(dshStandardAdapterPlugin, { profileBaseUrl: pathToFileURL(`${profileDir}/`).href })

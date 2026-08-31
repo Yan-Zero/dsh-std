@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog } from '@dsh-std/core'
 import {
+  COMMUNITY_CONTRIBUTION_ID_LABEL,
   COMMUNITY_V015_MANIFEST_VERSION,
   ManifestDefinitionCatalog,
   defineManifest,
   facetIdentity,
+  matchesExtensionPublicationName,
   parseManifest,
   projectManifest,
 } from '../src/index.js'
@@ -97,9 +99,15 @@ describe('@dsh-std/manifest', () => {
     expect(facet.extensions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         apiVersion: 'commands.dsh/v1alpha1', kind: 'Command',
-        metadata: expect.objectContaining({ name: 'command' }),
+        metadata: expect.objectContaining({
+          name: 'command',
+          labels: { [COMMUNITY_CONTRIBUTION_ID_LABEL]: 'example.acme.codex.command' },
+        }),
       }),
     ]))
+    expect(matchesExtensionPublicationName(facet.extensions![0]!, 'command')).toBe(true)
+    expect(matchesExtensionPublicationName(facet.extensions![0]!, 'example.acme.codex.command')).toBe(true)
+    expect(matchesExtensionPublicationName(facet.extensions![0]!, 'example.acme.codex.other')).toBe(false)
     expect(facet.permissions).toEqual([
       expect.objectContaining({ action: 'commands.invoke', spec: { scope: 'example.acme.codex.command' } }),
     ])
