@@ -27,6 +27,8 @@ Entrypoint 在激活期间通过 `context.protocols.implement()` 与 `context.ex
 
 当前 DSH 映射实现 `CommandRuntime`、`ModelCatalog`、`SessionCatalog` 的 list/get/create/rename、`SessionHistory` 的 read/follow、本地 `Tool` / `ToolOverride` activation 与 browser-local UI contribution，并在协议目录中装载 `MessageObserver`、`LocalStorage` 与 Presentation definitions。Session descriptor 与 history 来自 `sessionController` 的 cold-safe list/inspect/follow seam；adapter 不宣称 DSH 尚未提供同等删除、watch 或幂等 fork 语义的 operation。DSH 原生 event 对 portable reader 标记为 ignorable，标准组件声明的 `SessionEvent` 则保留其 replay 分类。
 
+`SessionCatalog.create` 按 request ID 保存初始输入与已完成结果，保留原有的跨连接 request ID 到 Session ID 映射。重试直接返回原结果，不撤销后续改名；同一 ID 改变输入会被拒绝。这些请求记录保存在 adapter 实例中。Adapter 重建后，request ID 若对应已有 Session，则返回当前 descriptor，不再初始化标题；跨重启重放原始结果和核对原始输入需要持久化请求记录，当前 adapter 尚未保存这种记录。Request ID 仍由该 adapter 的所有 consumer 共享，调用方应使用全局唯一的 request ID。
+
 工具函数不会穿过 connection endpoint；adapter 把它们注册进 DSH 原生 registry，并在每次已接受调用中提供 DSH 的模型、附件、filesystem observed、write-intent、sandbox 与嵌套 context 语义。装载 definition 不会发布相应 support；只有实际 Host participant 越过 publication barrier 后，required contract 才能协商成功。命令和模型目录只使用 active facet 已发布的 extension，并保留 component、facet、participant provenance。Adapter 不会把 Presentation 操作序列化到命令结果；当前 agreement 的类型化 client 必须由 Connection Host 按 invocation scope 提供。
 
 Typert 只是 DSH 当前暴露 adapter service 的方式，不是 `@dsh-std/connection` 的线协议要求。

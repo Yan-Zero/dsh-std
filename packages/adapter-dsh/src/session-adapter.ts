@@ -5,6 +5,7 @@ import type { CapabilityHandlerContext, CapabilityImplementation } from '@dsh-st
 import {
   sessionCatalogImplementation,
   type CreateSessionInput,
+  type CreateSessionResult,
   type ListSessionsInput,
   type RenameSessionInput,
   type SessionCatalogPage,
@@ -84,11 +85,19 @@ interface CatalogSnapshot {
   readonly sessions: readonly SessionDescriptor[]
 }
 
+interface CreateRequest {
+  readonly input: CreateSessionInput
+  readonly sessionId: string
+  initializeTitle: boolean
+  result?: CreateSessionResult
+}
+
 /** Product adapter for the portable SessionCatalog and SessionHistory capabilities. */
 export class DshSessionProtocolAdapter {
   readonly implementations: readonly CapabilityImplementation[]
 
   private readonly snapshots = new Map<string, CatalogSnapshot>()
+  private readonly createRequests = new Map<string, CreateRequest>()
   private catalogRevision = 0
   private catalogFingerprint: string | undefined
   private mutationTail: Promise<void> = Promise.resolve()
@@ -196,21 +205,45 @@ export class DshSessionProtocolAdapter {
     }
   }
 
-  private create(input: CreateSessionInput, signal: AbortSignal): Promise<{ readonly session: SessionDescriptor }> {
+  private create(input: CreateSessionInput, signal: AbortSignal): Promise<CreateSessionResult> {
     return this.serializeMutation(async () => {
       signal.throwIfAborted()
-      const sessionId = sessionIdForRequest(input.requestId)
-      let descriptor = await this.get({ provider: this.participantId, id: sessionId }, signal)
-      if (descriptor === undefined) {
-        await this.controller.create({ sessionId })
-        descriptor = await this.requiredDescriptor(sessionId, signal)
+      let request = this.createRequests.get(input.requestId)
+      if (request === undefined) {
+        request = { input, sessionId: sessionIdForRequest(input.requestId), initializeTitle: false }
+        this.createRequests.set(input.requestId, request)
+      } else if (request.input.title !== input.title) {
+        throw Object.assign(new Error('SessionCatalog.create requestId conflicts with an earlier input'), {
+          code: 'REVISION_CONFLICT',
+        })
       }
-      if (input.title !== undefined && descriptor.title !== input.title) {
-        await this.controller.rename({ sessionId, title: input.title })
-        descriptor = await this.requiredDescriptor(sessionId, signal)
+      if (request.result !== undefined) return request.result
+
+      const { sessionId } = request
+      let mutationAttempted = false
+      try {
+        let descriptor = await this.get({ provider: this.participantId, id: sessionId }, signal)
+        if (descriptor === undefined) {
+          signal.throwIfAborted()
+          request.initializeTitle = true
+          mutationAttempted = true
+          await this.controller.create({ sessionId })
+          descriptor = await this.requiredDescriptor(sessionId, signal)
+        }
+        // A failed response may follow a committed title write. Never replace an
+        // existing title while recovering an incomplete create, including user edits.
+        if (request.initializeTitle && input.title !== undefined && descriptor.title === undefined) {
+          signal.throwIfAborted()
+          mutationAttempted = true
+          await this.controller.rename({ sessionId, title: input.title })
+          descriptor = await this.requiredDescriptor(sessionId, signal)
+        }
+        request.result = Object.freeze({ session: descriptor })
+        return request.result
+      } finally {
+        // The native operation may commit before rejecting or observing cancellation.
+        if (mutationAttempted) this.invalidateCatalog()
       }
-      this.invalidateCatalog()
-      return { session: descriptor }
     })
   }
 

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import type { CapabilityImplementation } from '@dsh-std/connection'
+import { describe, expect, it, vi } from 'vitest'
+import type { CapabilityHandlerContext, CapabilityImplementation } from '@dsh-std/connection'
+import type { CreateSessionResult } from '@dsh-std/session/catalog'
 import { DshSessionProtocolAdapter, type DshSessionControllerFace } from '../src/session-adapter.js'
 
 interface FixtureEvent {
@@ -84,11 +85,25 @@ function fixture(): {
   }
 }
 
-function context(progress: unknown[] = [], signal = new AbortController().signal) {
+function context(
+  progress: unknown[] = [],
+  signal = new AbortController().signal,
+  client: { connectionId?: string; instanceId?: string; participantId?: string } = {},
+): CapabilityHandlerContext {
+  const protocol = { apiVersion: 'session.dsh/v1alpha1', kind: 'SessionCatalog' }
   return {
-    connectionId: 'connection-1', planRevision: 1, invocationId: 'invocation-1',
-    binding: {}, signal, progress: (value: unknown) => { progress.push(value) },
-  } as never
+    connectionId: client.connectionId ?? 'connection-1', planRevision: 1, invocationId: 'invocation-1',
+    binding: {
+      bindingId: 'binding-1', agreementId: 'agreement-1', planRevision: 1,
+      consumer: {
+        endpoint: { id: 'client', instanceId: client.instanceId ?? 'client-instance' },
+        participantId: client.participantId ?? 'client/plugin',
+      },
+      provider: { endpoint: { id: 'dsh', instanceId: 'dsh-instance' }, participantId: 'dsh/runtime' },
+      requirement: protocol, support: protocol,
+    },
+    signal, progress: value => { progress.push(value) },
+  }
 }
 
 describe('DSH Session protocol adapter', () => {
@@ -135,6 +150,159 @@ describe('DSH Session protocol adapter', () => {
     expect(second.session.session.id).toBe(first.session.session.id)
     expect(controller.createCalls).toEqual([first.session.session.id])
     expect(controller.renameCalls).toEqual([{ sessionId: first.session.session.id, title: 'Portable title' }])
+  })
+
+  it('replays the original create result without undoing a later rename', async () => {
+    const { controller, catalog } = fixture()
+    const input = { requestId: 'request-1', title: 'Original' }
+    const first = await catalog.handle('create', input, context()) as CreateSessionResult
+    await catalog.handle('rename', { session: first.session.session, title: 'User edited' }, context())
+
+    const retry = await catalog.handle('create', input, { ...context(), invocationId: 'retry' })
+
+    expect(retry).toEqual(first)
+    expect(await catalog.handle('get', first.session.session, context())).toMatchObject({ title: 'User edited' })
+    expect(controller.renameCalls.map(call => call.title)).toEqual(['Original', 'User edited'])
+    expect(controller.createCalls).toHaveLength(1)
+  })
+
+  it.each([
+    [{ title: 'Original' }, { title: 'Changed' }],
+    [{}, { title: 'Added' }],
+    [{ title: 'Original' }, {}],
+  ])('rejects changed create input without writing to the existing session (%j -> %j)', async (original, changed) => {
+    const { controller, catalog } = fixture()
+    const first = await catalog.handle('create', { requestId: 'request-1', ...original }, context()) as CreateSessionResult
+    const before = structuredClone(controller.sessions.get(first.session.session.id))
+
+    await expect(catalog.handle('create', { requestId: 'request-1', ...changed }, context()))
+      .rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+
+    expect(controller.sessions.get(first.session.session.id)).toEqual(before)
+    expect(controller.createCalls).toHaveLength(1)
+  })
+
+  it('serializes concurrent retries into one creation and one title write', async () => {
+    const { controller, catalog } = fixture()
+    const input = { requestId: 'request-1', title: 'Original' }
+    const [first, second] = await Promise.all([
+      catalog.handle('create', input, context()),
+      catalog.handle('create', input, { ...context(), invocationId: 'retry' }),
+    ])
+    expect(second).toEqual(first)
+    expect(controller.createCalls).toHaveLength(1)
+    expect(controller.renameCalls).toHaveLength(1)
+  })
+
+  it.each([
+    { connectionId: 'connection-2' },
+    { instanceId: 'other-client-instance' },
+    { participantId: 'other/plugin' },
+  ])('preserves the existing request-to-session mapping across caller changes (%j)', async client => {
+    const { controller, catalog } = fixture()
+    const input = { requestId: 'request-1', title: 'Original' }
+    const first = await catalog.handle('create', input, context()) as CreateSessionResult
+    await controller.rename({ sessionId: first.session.session.id, title: 'User edited' })
+    const second = await catalog.handle('create', input, context([], undefined, client)) as CreateSessionResult
+    expect(second).toEqual(first)
+    expect(controller.createCalls).toHaveLength(1)
+    expect(controller.renameCalls.map(call => call.title)).toEqual(['Original', 'User edited'])
+  })
+
+  it('retains the create receipt across plan revisions within the same client scope', async () => {
+    const { catalog } = fixture()
+    const input = { requestId: 'request-1', title: 'Original' }
+    const first = await catalog.handle('create', input, context()) as CreateSessionResult
+    await catalog.handle('rename', { session: first.session.session, title: 'User edited' }, context())
+    const next = context()
+    expect(await catalog.handle('create', input, {
+      ...next, planRevision: 2,
+      binding: { ...next.binding, planRevision: 2, bindingId: 'binding-2', agreementId: 'agreement-2' },
+    })).toEqual(first)
+  })
+
+  it('finishes a title write that failed before committing without creating another session', async () => {
+    const { controller, catalog } = fixture()
+    vi.spyOn(controller, 'rename').mockRejectedValueOnce(new Error('temporary title failure'))
+    const input = { requestId: 'request-1', title: 'Original' }
+    await expect(catalog.handle('create', input, context())).rejects.toThrow('temporary title failure')
+    expect(await catalog.handle('create', input, context())).toMatchObject({ session: { title: 'Original' } })
+    expect(controller.createCalls).toHaveLength(1)
+    expect(controller.renameCalls).toHaveLength(1)
+  })
+
+  it('does not repeat a title write that committed before its response failed', async () => {
+    const { controller, catalog } = fixture()
+    const rename = controller.rename.bind(controller)
+    vi.spyOn(controller, 'rename').mockImplementationOnce(async input => {
+      await rename(input)
+      throw new Error('title response lost')
+    })
+    const input = { requestId: 'request-1', title: 'Original' }
+    await expect(catalog.handle('create', input, context())).rejects.toThrow('title response lost')
+    const sessionId = controller.createCalls[0]!
+    await rename({ sessionId, title: 'User edited' })
+
+    expect(await catalog.handle('create', input, context())).toMatchObject({ session: { title: 'User edited' } })
+    expect(controller.renameCalls.map(call => call.title)).toEqual(['Original', 'User edited'])
+    expect(controller.createCalls).toHaveLength(1)
+  })
+
+  it('recovers when creation committed before its response failed', async () => {
+    const { controller, catalog } = fixture()
+    const create = controller.create.bind(controller)
+    vi.spyOn(controller, 'create').mockImplementationOnce(async input => {
+      await create(input)
+      throw new Error('create response lost')
+    })
+    const input = { requestId: 'request-1', title: 'Original' }
+    await expect(catalog.handle('create', input, context())).rejects.toThrow('create response lost')
+    expect(await catalog.handle('create', input, context())).toMatchObject({ session: { title: 'Original' } })
+    expect(controller.createCalls).toHaveLength(1)
+  })
+
+  it('rejects changed input even when the first create has not finished', async () => {
+    const { controller, catalog } = fixture()
+    vi.spyOn(controller, 'rename').mockRejectedValueOnce(new Error('temporary title failure'))
+    const input = { requestId: 'request-1', title: 'Original' }
+    await expect(catalog.handle('create', input, context())).rejects.toThrow('temporary title failure')
+    await expect(catalog.handle('create', { ...input, title: 'Changed' }, context()))
+      .rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+    expect(await catalog.handle('create', input, context())).toMatchObject({ session: { title: 'Original' } })
+    expect(controller.renameCalls.map(call => call.title)).toEqual(['Original'])
+  })
+
+  it('resumes initialization after cancellation without creating another session', async () => {
+    const { controller, catalog } = fixture()
+    const abort = new AbortController()
+    const create = controller.create.bind(controller)
+    vi.spyOn(controller, 'create').mockImplementationOnce(async input => {
+      const result = await create(input)
+      abort.abort(new Error('cancelled after create'))
+      return result
+    })
+    const input = { requestId: 'request-1', title: 'Original' }
+    await expect(catalog.handle('create', input, context([], abort.signal)))
+      .rejects.toThrow('cancelled after create')
+    expect(controller.renameCalls).toHaveLength(0)
+    expect(await catalog.handle('create', input, context())).toMatchObject({ session: { title: 'Original' } })
+    expect(controller.createCalls).toHaveLength(1)
+  })
+
+  it.each([{}, { title: 'Original' }])('adopts an existing session without reinitializing its title after adapter recreation (%j)', async original => {
+    const { controller, catalog } = fixture()
+    const input = { requestId: 'request-1', ...original }
+    const first = await catalog.handle('create', input, context()) as CreateSessionResult
+    await controller.rename({ sessionId: first.session.session.id, title: 'User edited' })
+    const recreated = new DshSessionProtocolAdapter('dsh/runtime', controller, () => 'ignorable')
+      .implementations.find(row => row.protocol.kind === 'SessionCatalog')!
+    const before = controller.renameCalls.length
+
+    expect(await recreated.handle('create', input, context())).toMatchObject({
+      session: { session: first.session.session, title: 'User edited' },
+    })
+    expect(controller.createCalls).toHaveLength(1)
+    expect(controller.renameCalls).toHaveLength(before)
   })
 
   it('translates durable event cursors, direction and replay classification', async () => {
