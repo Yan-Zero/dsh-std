@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed `SessionCatalog.create` retries overwriting later title edits. Create receipts preserve the existing request-to-session mapping, reject changed input, and recover incomplete native operations without rewriting an existing title.
+
 ## 0.1.1-rc.2
 
 - Adapted the Host and browser integration to the DeepSeek Harness `0.1.2-alpha.2` API split, replacing the removed client-runtime dependency with API Gateway and Session Controller services and recognizing namespaced Remote error codes.
