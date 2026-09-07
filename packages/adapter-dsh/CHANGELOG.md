@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+### Patch Changes
+
+- 7615a96: Prevent SessionCatalog create retries from overwriting later title edits. Preserve the existing request-to-session mapping, retain completed results, reject changed input, and recover partial native operations without repeating committed title writes.
+
 ## Unreleased
 
 - Fixed `SessionCatalog.create` retries overwriting later title edits. Create receipts preserve the existing request-to-session mapping, reject changed input, and recover incomplete native operations without rewriting an existing title.
