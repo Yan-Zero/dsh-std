@@ -177,6 +177,8 @@ DSH 提供的 create、rename、delete 或 fork 操作只有在其公开领域 A
 
 SessionCatalog create 的重试必须遵守 Session 协议的请求幂等规则。已完成请求的重试不得重新执行标题初始化，也不得覆盖后续显式改名。原生操作提交后发生响应失败时，adapter 应检查已提交状态，避免恢复过程重复修改已有标题。
 
+> **注解（草案口径）**：跨重启持久化请求记录（重放原始结果、检测原始输入冲突）与请求记录的内存有界性，仍属草案口径，尚未定为协议契约。当前实现仅在 adapter 实例生命周期内保证 `requestId` 幂等；待出现真实消费需求后，再以专门、带证据的 proposal 约束。
+
 Session adapter 还将 selected facets 的 `SessionEvent` resources 映射到 DSH 会话事件 vocabulary。DSH 的内建事件集合构成基线，组件 contribution 按 activation instance 记录 owner；停用组件不会删除基线事件或其他 owner 的注册。
 
 事件写入仍使用 DSH Session API。Adapter 根据 `replay` 检查持久 envelope 是否具备相应的未知事件处理语义；不能保存 ignorable 标记的产品版本不声明完整支持该类写入。
