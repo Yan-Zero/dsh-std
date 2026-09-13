@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ProtocolCatalog, defineProtocolDeclaration } from '@dsh-std/core'
 import {
+  CapabilityFailure,
   ConnectionBroker,
   ConnectionInvocationError,
   StandardEndpointRuntime,
@@ -105,6 +106,31 @@ describe('@dsh-std/connection', () => {
     )
     expect(pair.plan.compatible).toBe(true)
     await expect(callable.left.client('client/consumer').invoke(service, 'echo', { text: 'hello' }).result).resolves.toEqual({ text: 'hello' })
+  })
+
+  it('preserves declared capability failures while containing ordinary handler errors', async () => {
+    const { left } = endpoints()
+    const remote = new StandardEndpointRuntime({ id: 'host', instanceId: 'host-errors' })
+    remote.register({
+      declaration: defineProtocolDeclaration({ participant: { id: 'host/provider' }, supports: [service] }),
+      implementations: [{
+        participantId: 'host/provider', protocol: service,
+        handle(operation) {
+          if (operation === 'business') throw new CapabilityFailure('EXAMPLE_CONFLICT', 'example conflict', { revision: 2 })
+          throw new Error('private implementation failure')
+        },
+      }],
+    })
+    const pair = createMemoryConnectionPair(left, remote, {
+      connectionId: 'memory-errors', revision: 1, protocols: protocols(),
+    })
+    const client = pair.left.client('client/consumer')
+    await expect(client.invoke(service, 'business', {}).result).rejects.toMatchObject({
+      name: 'CapabilityFailure', code: 'EXAMPLE_CONFLICT', details: { revision: 2 },
+    })
+    await expect(client.invoke(service, 'private', {}).result).rejects.toMatchObject({
+      name: 'ConnectionInvocationError', code: 'handler-failed', message: 'private implementation failure',
+    })
   })
 
   it('revokes calls when a connection closes', async () => {

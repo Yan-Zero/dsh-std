@@ -463,6 +463,8 @@ Connection error 至少区分：
 
 领域协议错误由其 message schema 保留。Connection 不把所有远端失败压缩成一个通用 handler error。
 
+采用通用 capability dispatch 的 definition 可以用 `CapabilityFailure` 表示已经声明的业务失败。其 `code` 必须非空，`details` 必须是 lossless JSON 数据；Connection 必须保留二者。普通未分类异常仍转换为 `handler-failed`，并且不得把 stack、绝对路径或未裁剪 cause 发送给 peer。该类只是本地 SDK 表达；wire adapter 按领域错误 envelope 编码，不传输 JavaScript prototype。
+
 ## Security considerations
 
 - Consumer 只能使用 Host 为 activation/invocation scope 签发的 `ConnectionService`；不能传入 plugin id 换取其他 participant 的连接公开面。

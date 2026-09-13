@@ -17,6 +17,7 @@
       "@dsh-std/tool": ["./packages/tool/src/index.ts"],
       "@dsh-std/presentation": ["./packages/presentation/src/index.ts"],
       "@dsh-std/session": ["./packages/session/src/index.ts"],
+      "@dsh-std/skill": ["./packages/skill/src/index.ts"],
       "@dsh-std/workspace": ["./packages/workspace/src/index.ts"]
     },
     "strict": true,

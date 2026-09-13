@@ -5,19 +5,24 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      before:
+        description: Commit immediately before the version increases (defaults to HEAD^)
+        required: false
+        type: string
 
 concurrency:
-  group: npm-release-${{ github.ref }}
+  group: npm-release
   cancel-in-progress: false
 
 permissions:
   contents: write
-  pull-requests: write
   id-token: write
 
 jobs:
   release:
-    name: Version or publish packages
+    name: Publish version increases
+    if: github.repository == 'Yan-Zero/dsh-std'
     runs-on: ubuntu-latest
 
     steps:
@@ -26,6 +31,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect package version increases
+        id: plan
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+          DISPATCH_BEFORE: ${{ inputs.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$PUSH_BEFORE"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            before="$DISPATCH_BEFORE"
+            if [[ -z "$before" ]]; then
+              before="$(git rev-parse HEAD^)"
+            fi
+          fi
+          if [[ ! "$before" =~ ^[0-9a-fA-F]{40}$ ]] || [[ "$before" =~ ^0+$ ]]; then
+            echo "No usable previous commit; skipping automatic release."
+            echo '[]' > "$RUNNER_TEMP/release-plan.json"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/release-plan.mjs --before "$before" --output "$RUNNER_TEMP/release-plan.json"
+          count="$(node -p "require(process.env.RUNNER_TEMP + '/release-plan.json').length")"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
 
@@ -33,6 +63,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org/
           cache: pnpm
 
       - name: Install dependencies
@@ -41,8 +72,91 @@ jobs:
       - name: Check packages
         run: pnpm check
 
-      - name: Create release pull request or publish
-        uses: changesets/action@v2.1.0
+      - name: Pack release candidates
+        if: steps.plan.outputs.count != '0'
+        env:
+          PLAN_FILE: ${{ runner.temp }}/release-plan.json
+          ARTIFACT_DIR: ${{ runner.temp }}/release-artifacts
+          ARTIFACTS_FILE: ${{ runner.temp }}/release-artifacts.tsv
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          : > "$ARTIFACTS_FILE"
+          node -e '
+            const plan = require(process.env.PLAN_FILE)
+            for (const row of plan) {
+              process.stdout.write([row.directory, row.name, row.version, row.tag, String(row.prerelease), row.distTag].join("\t") + "\n")
+            }
+          ' | while IFS=$'\t' read -r directory package version tag prerelease dist_tag; do
+            safe="${package#@}"
+            safe="${safe//\//-}"
+            tarball="$ARTIFACT_DIR/$safe-$version.tgz"
+            pnpm --filter "$package" pack --out "$tarball"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$directory" "$package" "$version" "$tag" "$prerelease" "$dist_tag" "$tarball" >> "$ARTIFACTS_FILE"
+          done
+
+      - name: Keep installable tarballs as a workflow artifact
+        if: steps.plan.outputs.count != '0'
+        uses: actions/upload-artifact@v7
         with:
-          publish-script: pnpm release
-          create-github-releases: true
+          name: dsh-std-${{ github.sha }}
+          path: ${{ runner.temp }}/release-artifacts/*.tgz
+          if-no-files-found: error
+
+      - name: Publish packages and create releases
+        if: steps.plan.outputs.count != '0'
+        env:
+          ARTIFACTS_FILE: ${{ runner.temp }}/release-artifacts.tsv
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          while IFS=$'\t' read -r directory package version tag prerelease dist_tag tarball; do
+            if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+              target="$(git rev-list -n 1 "$tag")"
+              if [[ "$target" != "$GITHUB_SHA" ]]; then
+                echo "Tag $tag already points to $target instead of $GITHUB_SHA" >&2
+                exit 1
+              fi
+              tag_exists=true
+            else
+              tag_exists=false
+            fi
+
+            local_integrity="$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); process.stdout.write('sha512-' + createHash('sha512').update(readFileSync(process.argv[1])).digest('base64'))" "$tarball")"
+            npm_error="$(mktemp)"
+            if registry_integrity="$(npm view "$package@$version" dist.integrity 2>"$npm_error")" && [[ -n "$registry_integrity" ]]; then
+              if [[ "$registry_integrity" != "$local_integrity" ]]; then
+                echo "$package@$version already exists with different package bytes" >&2
+                exit 1
+              fi
+              echo "$package@$version is already published with matching bytes."
+            else
+              if ! grep -Eq 'E404|404 Not Found' "$npm_error"; then
+                cat "$npm_error" >&2
+                exit 1
+              fi
+              npm publish "$tarball" --access public --tag "$dist_tag" --provenance
+            fi
+            rm -f "$npm_error"
+
+            if [[ "$tag_exists" != true ]]; then
+              git tag --annotate "$tag" --message "Release $tag" "$GITHUB_SHA"
+              git push origin "refs/tags/$tag"
+            fi
+
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" "$tarball" --clobber
+            else
+              args=(--title "$tag" --generate-notes --verify-tag)
+              if [[ "$prerelease" == true ]]; then
+                args+=(--prerelease)
+              fi
+              gh release create "$tag" "$tarball" "${args[@]}"
+            fi
+          done < "$ARTIFACTS_FILE"

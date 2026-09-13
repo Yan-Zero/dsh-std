@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   ProtocolCatalog,
   defineProtocolDeclaration,
+  freezeProtocolJsonValue,
   parseApiVersion,
   protocolFamilyKey,
   validateApiReference,
+  validateProtocolJsonValue,
 } from '../src/index.js'
 
 function catalog() {
@@ -147,6 +149,50 @@ describe('@dsh-std/core', () => {
       'requirement:widgets.example/v1beta1#Widget',
       'support:widgets.example/v1alpha1#Widget',
     ])
+  })
+
+  it('lets newer definitions validate agreements without breaking legacy definitions', () => {
+    const protocols = new ProtocolCatalog({ name: 'agreement-aware', version: '1.0.0' })
+    protocols.register({
+      apiVersion: 'widgets.example/v1alpha1', kind: 'Widget',
+      validateRequirement: value => value,
+      validateSupport: value => value,
+      validateAgreement(value, context) {
+        expect(context).toEqual({ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' })
+        if (typeof value !== 'object' || value === null) throw new TypeError('agreement must be an object')
+        return Object.freeze({ accepted: true })
+      },
+      negotiate: () => ({ agreement: { accepted: 'unvalidated' } }),
+    })
+    const report = protocols.negotiate([
+      defineProtocolDeclaration({ participant: { id: 'consumer' }, requires: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget' }] }),
+    ])
+    expect(report.protocols[0]?.agreement).toEqual({ accepted: true })
+  })
+
+  it('validates and snapshots lossless protocol JSON data', () => {
+    const source = { nested: [1, 'two', null, true] }
+    const snapshot = freezeProtocolJsonValue(source)
+    expect(snapshot).toEqual(source)
+    expect(Object.isFrozen(snapshot)).toBe(true)
+    expect(Object.isFrozen((snapshot as typeof source).nested)).toBe(true)
+    expect(() => validateProtocolJsonValue(new Date(0))).toThrow(/plain objects/u)
+    expect(() => validateProtocolJsonValue({ missing: undefined })).toThrow(/lossless JSON/u)
+    expect(() => validateProtocolJsonValue(-0)).toThrow(/lossless JSON numbers/u)
+    expect(() => validateProtocolJsonValue(Array(1))).toThrow(/sparse|dense/u)
+    const symbolRecord = { valid: true, [Symbol('hidden')]: false }
+    expect(() => validateProtocolJsonValue(symbolRecord)).toThrow(/enumerable string keys/u)
+    const cyclic: unknown[] = []
+    cyclic.push(cyclic)
+    expect(() => validateProtocolJsonValue(cyclic)).toThrow(/cycles/u)
+    expect(() => defineProtocolDeclaration({
+      participant: { id: 'invalid-spec' },
+      requires: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget', spec: new Map() }],
+    })).toThrow(/plain objects/u)
+    expect(() => defineProtocolDeclaration({
+      participant: { id: 'legacy-undefined' },
+      requires: [{ apiVersion: 'widgets.example/v1alpha1', kind: 'Widget', spec: undefined }],
+    })).not.toThrow()
   })
 
   it('reports missing definitions and required supports separately', () => {

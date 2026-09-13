@@ -59,7 +59,7 @@ interface ProtocolDeclaration {
 
 `supports` 表示该参与者在当前协商范围内实际可用的协议实现。安装了某个包、在静态清单中提到某项协议，或者能够解析其数据，都不能代替运行中的 support 声明。
 
-Requirement 和 support 可以携带由所属协议定义的 `spec`。Core 保留该数据，但不解释其字段：
+Requirement 和 support 可以携带由所属协议定义的 `spec`。Core 保留该数据，但不解释其字段。非空 `spec` 必须（MUST）是 lossless JSON 数据：有限数字、字符串、布尔值、null、数组或仅含这些值的普通对象；Date、Map、函数、循环引用和嵌套 `undefined` 必须拒绝。旧版 TypeScript 调用显式写出的 `spec: undefined` 继续等价于省略该字段。
 
 ```ts
 interface ProtocolRequirement extends ApiReference {
@@ -155,6 +155,7 @@ interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, A
   readonly accepts?: readonly string[]
   validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
   validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
+  readonly validateAgreement?: (agreement: unknown, context: ProtocolValidationContext) => Agreement
   negotiate(input: ProtocolNegotiationInput<RequirementSpec, SupportSpec>): ProtocolNegotiationResult<Agreement>
 }
 ```
@@ -164,6 +165,7 @@ interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unknown, A
 - 协议专属字段由协议 definition 拥有；
 - `accepts` 只表示同一 definition 能识别哪些准确坐标，不推断这些版本兼容；
 - validator 接收原始 `apiVersion + kind` 上下文，并按该准确版本校验 `spec`；
+- 新 definition 可以通过 `validateAgreement` 在 agreement 发布与 plan digest 之前执行 definition-owned 校验和规范化；为兼容既有 `v1alpha1` definition，该成员可省略；
 - 协商结果可由其他符合规范的实现独立复算；
 - 注册顺序不影响结果；
 - definition 不因被注册而产生一项 live implementation。
@@ -182,6 +184,8 @@ Evaluator 在解释一项协议专属 `spec` 前必须取得能够处理该坐�
 - evaluator 的身份与版本。
 
 Agreement 是协议拥有的数据。Core 不假定它一定是 RPC binding、资源选择或权限 grant。调用方也不能仅凭 agreement 绕过相应协议和产品实现的授权检查。
+
+Definition 提供 `validateAgreement` 时，Evaluator 必须（MUST）在报告发布前调用它；失败产生 definition error，未经校验的 agreement 不得进入报告。需要跨 endpoint 或进入 plan digest 的 agreement 必须是 lossless JSON 数据。进程内 definition 即使使用更丰富的临时对象，也必须在返回 agreement 前投影为该数据边界。
 
 当一份 definition 识别多个 `apiVersion` 时，Core report 的协议坐标仍是 definition 主坐标。请求版本、support 版本和最终采用的 contract dialect 由协议自己的 agreement 按[协议版本兼容与协商提案](version-compatibility.zh.md)记录；Core 不提供通用的版本选择字段。
 

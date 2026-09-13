@@ -61,7 +61,8 @@ export interface LifecycleRecord {
 
 export interface CleanupScope {
   readonly signal: AbortSignal
-  add(dispose: () => void | Promise<void>): () => void
+  /** The returned disposer is idempotent and every call observes the same settlement. */
+  add(dispose: () => void | Promise<void>): () => Promise<void>
 }
 
 export interface ProtocolImplementation<T = unknown> {
@@ -371,29 +372,40 @@ class Scope implements CleanupScope {
   private readonly controller = new AbortController()
   private readonly disposers: Array<() => void | Promise<void>> = []
   private closed = false
+  private closing: Promise<void> | undefined
 
   get signal(): AbortSignal { return this.controller.signal }
 
-  add(dispose: () => void | Promise<void>): () => void {
+  add(dispose: () => void | Promise<void>): () => Promise<void> {
     if (this.closed) throw new Error('cleanup scope is closed')
-    let active = true
-    const once = async (): Promise<void> => {
-      if (!active) return
-      active = false
-      await dispose()
+    let settlement: Promise<void> | undefined
+    const once = (): Promise<void> => {
+      if (settlement !== undefined) return settlement
+      try {
+        settlement = Promise.resolve(dispose())
+      } catch (error) {
+        settlement = Promise.reject(error)
+      }
+      void settlement.catch(() => undefined)
+      return settlement
     }
     this.disposers.push(once)
-    return () => { void once() }
+    return once
   }
 
   abort(reason?: string): void {
     if (!this.controller.signal.aborted) this.controller.abort(reason)
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return
+  close(): Promise<void> {
+    if (this.closing !== undefined) return this.closing
     this.closed = true
     this.abort()
+    this.closing = this.drain()
+    return this.closing
+  }
+
+  private async drain(): Promise<void> {
     const errors: unknown[] = []
     for (const dispose of this.disposers.reverse()) {
       try { await dispose() } catch (error) { errors.push(error) }

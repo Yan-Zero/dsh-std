@@ -51,6 +51,11 @@ export interface ProtocolDefinition<RequirementSpec = unknown, SupportSpec = unk
   readonly accepts?: readonly string[]
   validateRequirement(spec: unknown, context: ProtocolValidationContext): RequirementSpec
   validateSupport(spec: unknown, context: ProtocolValidationContext): SupportSpec
+  /**
+   * Normalize and validate the definition-owned agreement before publication.
+   * Optional for definitions written against the original v1alpha1 API.
+   */
+  readonly validateAgreement?: (agreement: unknown, context: ProtocolValidationContext) => Agreement
   negotiate(
     input: ProtocolNegotiationInput<RequirementSpec, SupportSpec, Policy>,
   ): ProtocolNegotiationOutcome<Agreement>
@@ -203,6 +208,15 @@ export class ProtocolCatalog {
           supports: Object.freeze([...group.supports]),
           ...(policy === undefined ? {} : { policy }),
         }))
+        if (Object.hasOwn(outcome, 'agreement') && stored.definition.validateAgreement !== undefined) {
+          outcome = Object.freeze({
+            ...outcome,
+            agreement: stored.definition.validateAgreement(
+              outcome.agreement,
+              validationContext(stored.definition),
+            ),
+          })
+        }
       } catch (error) {
         outcome = { issues: [{ code: 'definition-failed', severity: 'error', message: errorMessage(error) }] }
       }

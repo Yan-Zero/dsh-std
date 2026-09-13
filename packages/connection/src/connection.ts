@@ -1,4 +1,4 @@
-import type { ApiReference, ProtocolSupport } from '@dsh-std/core'
+import { freezeProtocolJsonValue, type ApiReference, type ProtocolJsonValue, type ProtocolSupport } from '@dsh-std/core'
 import type { CapabilityBinding, ConnectionEndpointReference, ConnectionPlan, EndpointOffer } from './model.js'
 
 export interface CapabilityHandlerContext<TProgress = unknown> {
@@ -73,5 +73,23 @@ export class ConnectionInvocationError extends Error {
   ) {
     super(message, options)
     this.name = 'ConnectionInvocationError'
+  }
+}
+
+/** Definition-owned business failure that survives a capability transport boundary. */
+export class CapabilityFailure extends Error {
+  readonly details?: ProtocolJsonValue
+
+  constructor(
+    readonly code: string,
+    message: string,
+    details?: ProtocolJsonValue,
+    options?: ErrorOptions,
+  ) {
+    if (typeof code !== 'string' || code.trim() === '') throw new TypeError('capability failure code must be non-empty')
+    if (typeof message !== 'string' || message.trim() === '') throw new TypeError('capability failure message must be non-empty')
+    super(message, options)
+    this.name = 'CapabilityFailure'
+    if (details !== undefined) this.details = freezeProtocolJsonValue(details, 'capability failure details')
   }
 }

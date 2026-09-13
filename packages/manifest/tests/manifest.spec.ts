@@ -4,6 +4,7 @@ import {
   COMMUNITY_CONTRIBUTION_ID_LABEL,
   COMMUNITY_V015_MANIFEST_VERSION,
   ManifestDefinitionCatalog,
+  defineComponentManifest,
   defineManifest,
   facetIdentity,
   matchesExtensionPublicationName,
@@ -41,6 +42,16 @@ function manifest() {
 }
 
 describe('@dsh-std/manifest', () => {
+  it('rejects non-JSON facet specs before definitions or code can observe them', () => {
+    expect(() => defineComponentManifest({
+      apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
+      metadata: { name: 'example.invalid-json', version: '1.0.0' },
+      spec: { facets: [{
+        name: 'host',
+        activation: { apiVersion: 'lifecycle.dsh/v1alpha1', kind: 'FacetModule', spec: { module: new Date(0) } },
+      }] },
+    } as never)).toThrow(/plain objects/u)
+  })
   it('keeps rc1 manifests valid while allowing empty containers to be omitted', () => {
     const minimal = defineManifest({
       $schema: COMMUNITY_DRAFT_SCHEMA_EXAMPLE,
@@ -76,6 +87,36 @@ describe('@dsh-std/manifest', () => {
       facets: { host: { entry: 'dist/host.js', apiVersion: 'v1alpha1' } },
     })
     expect(Object.isFrozen(parsed)).toBe(true)
+  })
+
+  it('normalizes parsed v0.15 empty containers for source compatibility', () => {
+    const parsed = parseManifest(JSON.stringify({
+      $schema: COMMUNITY_DRAFT_SCHEMA_EXAMPLE,
+      manifestVersion: COMMUNITY_V015_MANIFEST_VERSION,
+      id: 'example.acme.minimal',
+      name: 'Minimal',
+      version: '1.0.0',
+      facets: { host: { entry: 'dist/host.js', apiVersion: 'v1alpha1' } },
+    }))
+    expect(parsed.requires.contracts).toEqual([])
+    expect(parsed.contributes.commands).toEqual([])
+    expect(parsed.permissions).toEqual([])
+    expect(parsed.subscriptions).toEqual([])
+  })
+
+  it('detaches normalized manifest containers from the caller', () => {
+    const source = {
+      $schema: COMMUNITY_DRAFT_SCHEMA_EXAMPLE,
+      manifestVersion: COMMUNITY_V015_MANIFEST_VERSION,
+      id: 'example.acme.detached',
+      name: 'Detached',
+      version: '1.0.0',
+      facets: { host: { entry: 'dist/host.js', apiVersion: 'v1alpha1' } },
+      requires: { contracts: [{ apiVersion: 'commands.dsh/v1alpha1', kind: 'Command' }] },
+    } as const
+    const normalized = defineManifest(source)
+    expect(normalized.requires.contracts).not.toBe(source.requires.contracts)
+    expect(Object.isFrozen(source.requires.contracts)).toBe(false)
   })
 
   it('rejects YAML, relative schema identifiers, and superseded manifest versions', () => {
@@ -151,7 +192,7 @@ describe('@dsh-std/manifest', () => {
     const catalog = new ManifestDefinitionCatalog()
     const protocols = new ProtocolCatalog({ name: 'test', version: '1.0.0' })
     expect(catalog.validate(projectManifest(manifest()), protocols)).toMatchObject({
-      validator: { name: '@dsh-std/manifest', version: '0.1.0' },
+      validator: { name: '@dsh-std/manifest', version: '0.1.1-rc.3' },
       source: 'memory:',
       digest: expect.stringMatching(/^fnv1a32:/),
       compatible: true,

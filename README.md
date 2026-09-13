@@ -82,6 +82,10 @@ pnpm install
 pnpm check
 ```
 
+## Releasing
+
+Published package versions are maintained directly in each `packages/*/package.json`; the release workflow does not rewrite them. A push to `main` compares those versions with the pre-push commit, then packs, OIDC-publishes, tags, and creates a GitHub Release for every increase. Prerelease versions use their prerelease identifier as the npm dist-tag (`rc`, `alpha`, or `beta`); stable versions use `latest`.
+
 ## License
 
 [MIT](LICENSE)

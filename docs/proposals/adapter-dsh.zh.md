@@ -169,13 +169,25 @@ Tool adapter 以 DSH 当前 ToolRuntime 为权威来源，manifest extension 只
 
 Model adapter 将 `ModelProviderHandler` 映射到 DSH 的 LLM registry。它把 DSH message、tool schema 和 attachment reference 转换为 model 标准类型，并将标准 stream chunk 转回 DSH stream；凭据始终由 provider handler 自己持有，不进入 adapter 或 connection catalog。没有可执行 handler 的 resource 只参与目录投影。
 
+### Skill mapping
+
+Skill mapping 将 active facet 中的 `skills.dsh/v1alpha1` `Skill` resources 汇入 DSH 原生 Skill provider registry。该映射是 adapter bundle 的内建模块；安装 `@dsh-std/adapter-dsh` 已包含它，不要求用户再安装 bridge package。模块边界只用于隔离产品映射代码，不改变 npm 安装面。
+
+目录枚举只使用静态名称、描述与 invocation policy，不读取正文。DSH 请求具体 Skill 时，adapter 才以发现该 Manifest 的 package root 解析 `entry`、完成符号链接后的 containment 检查并读取 UTF-8 Markdown。Facet rollback 或 unload 必须撤销对应候选并使 DSH catalog cache 失效；读取期间 owner 失效时不得返回正文。
+
+DSH 的 provider rank、cache key、source bucket 与 scope layer 是产品实现细节，不进入 `@dsh-std/skill`。标准 Skill 间的同名冲突在 composition 阶段失败，adapter 不使用 DSH rank 替代标准 owner 仲裁。
+
 ### Session mapping
 
-Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。Catalog list/get 只返回当前 scope 可见的 descriptor；History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset。
+Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。面向 DeepSeek Harness `0.1.5-rc.2` 时，Catalog list 使用 Session Controller 的 body-free summaries 与已验证 projections，不为每个列表项读取完整 event log；Get/History 才按明确 SessionReference inspect。History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset，也不请求只供产品 Web 呈现的 cursorless assistant stream。
+
+为保持上一适配线兼容，缺少 `updatedAt` 等新版 summary 字段的 DSH `0.1.2` Controller 继续使用逐项 inspect；Adapter 不得把旧 summary 当作 malformed 0.1.5 数据，也不得在 0.1.5 已提供完整 body-free summary 时退化为全历史读取。
 
 DSH 提供的 create、rename、delete 或 fork 操作只有在其公开领域 API 可以保持对应原子性与 lifecycle 语义时才进入 support spec。缺少某项产品操作不会阻止 adapter 发布只读 Catalog/History；adapter 不能绕过 Session invariant 伪造该 operation。
 
-SessionCatalog create 的重试必须遵守 Session 协议的请求幂等规则。已完成请求的重试不得重新执行标题初始化，也不得覆盖后续显式改名。原生操作提交后发生响应失败时，adapter 应检查已提交状态，避免恢复过程重复修改已有标题。
+SessionCatalog create 的重试必须遵守 Session 协议的请求幂等规则。Receipt 与确定性 Session id 必须至少按 consumer endpoint instance、participant identity 与 requestId 隔离；connection id 与 plan revision 变化不改变同一 client scope，另一个 endpoint instance 或 participant 使用相同 requestId 不得命中该 receipt。已完成请求的重试不得重新执行标题初始化，也不得覆盖后续显式改名。原生操作提交后发生响应失败时，adapter 应检查已提交状态，避免恢复过程重复修改已有标题。
+
+DSH `0.1.5` 的 fork lineage cut 来自 inspection 顶层 `inheritedEventCount`，不是旧 header 的 `seedLength`。Adapter 在 Get/History 路径使用该值产生标准 `lineage.through`；body-free Catalog list 可以只报告 parent 而省略无法从 summary 证明的 through cursor。
 
 > **注解（草案口径）**：跨重启持久化请求记录（重放原始结果、检测原始输入冲突）与请求记录的内存有界性，仍属草案口径，尚未定为协议契约。当前实现仅在 adapter 实例生命周期内保证 `requestId` 幂等；待出现真实消费需求后，再以专门、带证据的 proposal 约束。
 
@@ -265,7 +277,7 @@ Adapter 在跨信任域前清理错误 stack、本地路径、凭据和内部 se
 
 ## Drawbacks
 
-把领域映射拆成独立 adapter 会增加包和 registration 数量，但避免一个基础 service 随所有标准协议膨胀。
+领域映射应保持独立源模块和清晰依赖边界。是否拆成额外发布包属于产品打包选择；默认 adapter bundle 可以自动组合常用映射，避免用户为每项标准能力重复安装 bridge package。
 
 旧 DSH API 若没有 owner、disposer 或 staging 状态，完整 publication barrier 需要 wrapper 或产品侧扩展点支持。
 
@@ -273,9 +285,9 @@ Adapter 在跨信任域前清理错误 stack、本地路径、凭据和内部 se
 
 ## Rationale and alternatives
 
-### 一个包含所有协议的全局 adapter
+### 每项领域映射都要求单独安装
 
-这种实现会让 connection、UI、command 和 model 的更新相互绑定，也让不相关 profile 等待不存在的服务。基础层只保留共同 lifecycle/ownership，领域 mapping 按需安装。
+这种方式具有最细的部署粒度，但会把内部模块边界转化为用户安装负担。默认 DSH adapter bundle 自动组合稳定映射；实现仍应在源代码和依赖注入层面隔离各领域，并且只在对应产品 service 存在时发布 support。其他产品可以采用不同的打包粒度。
 
 ### 每个插件直接实现 Host RPC
 

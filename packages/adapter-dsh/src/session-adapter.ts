@@ -1,7 +1,7 @@
 /** DeepSeek Harness Session Controller mapping for the standard Session protocols. */
 
 import { createHash, randomUUID } from 'node:crypto'
-import type { CapabilityHandlerContext, CapabilityImplementation } from '@dsh-std/connection'
+import { CapabilityFailure, type CapabilityHandlerContext, type CapabilityImplementation } from '@dsh-std/connection'
 import {
   sessionCatalogImplementation,
   type CreateSessionInput,
@@ -35,6 +35,8 @@ interface DshSessionHeader {
   readonly id: string
   readonly createdAt: number
   readonly parentSession?: string
+  readonly isSeeded?: boolean
+  /** Compatibility with the pre-0.1.5 Session header. */
   readonly seedLength?: number
   readonly origin?: 'subagent'
 }
@@ -46,8 +48,18 @@ interface DshSessionProjectionHints {
 
 interface DshSessionSummary {
   readonly sessionId: string
+  readonly updatedAt?: number
+  readonly running?: boolean
+  readonly blank?: boolean
+  readonly parentSessionId?: string
   readonly origin?: 'subagent'
   readonly projections?: DshSessionProjectionHints
+}
+
+interface DshSessionInspection {
+  readonly meta: DshSessionHeader
+  readonly inheritedEventCount?: number
+  readonly events: readonly DshSessionEvent[]
 }
 
 interface DshSessionFollowSnapshot {
@@ -60,15 +72,12 @@ interface DshSessionFollowEvent {
   readonly event: DshSessionEvent
 }
 
-/** Structural face of `@deepseek-ai/dsh-api-session-controller@0.1.2-alpha.2`. */
+/** Structural face shared by supported DSH 0.1.2 and 0.1.5 Session Controllers. */
 export interface DshSessionControllerFace {
   list(request: { readonly cursor?: string }, signal: AbortSignal): Promise<{
     readonly items: readonly DshSessionSummary[]
   }>
-  inspect(sessionId: string, signal?: AbortSignal): Promise<{
-    readonly meta: DshSessionHeader
-    readonly events: readonly DshSessionEvent[]
-  }>
+  inspect(sessionId: string, signal?: AbortSignal): Promise<DshSessionInspection>
   create(request: { readonly sessionId?: string }): Promise<{ readonly sessionId: string }>
   rename(request: { readonly sessionId: string; readonly title: string }): Promise<{
     readonly title: string
@@ -116,7 +125,7 @@ export class DshSessionProtocolAdapter {
       }, {
         list: (input, context) => this.list(input, context),
         get: (session, context) => this.get(session, context.signal),
-        create: (input, context) => this.create(input, context.signal),
+        create: (input, context) => this.create(input, context),
         rename: (input, context) => this.rename(input, context.signal),
       }),
       sessionHistoryImplementation(participantId, {
@@ -169,8 +178,8 @@ export class DshSessionProtocolAdapter {
     const listed = await this.controller.list({}, signal)
     const ordinary = listed.items.filter(item => item.origin !== 'subagent')
     const sessions = await Promise.all(ordinary.map(async item => {
-      const inspected = await this.controller.inspect(item.sessionId, signal)
-      return descriptorOf(this.participantId, inspected.meta, inspected.events)
+      if (hasBodyFreeDescriptor(item)) return descriptorOfSummary(this.participantId, item)
+      return descriptorOf(this.participantId, await this.controller.inspect(item.sessionId, signal))
     }))
     const fingerprint = sessions
       .map(session => `${session.session.id}\0${String(session.revision)}`)
@@ -197,7 +206,7 @@ export class DshSessionProtocolAdapter {
     try {
       const inspected = await this.controller.inspect(session.id, signal)
       if (inspected.meta.origin === 'subagent') return undefined
-      return descriptorOf(this.participantId, inspected.meta, inspected.events)
+      return descriptorOf(this.participantId, inspected)
     } catch (error) {
       const code = failureCode(error)
       if (code === 'session/not-found' || code === 'session-not-found') return undefined
@@ -205,17 +214,21 @@ export class DshSessionProtocolAdapter {
     }
   }
 
-  private create(input: CreateSessionInput, signal: AbortSignal): Promise<CreateSessionResult> {
+  private create(input: CreateSessionInput, context: CapabilityHandlerContext): Promise<CreateSessionResult> {
     return this.serializeMutation(async () => {
+      const { signal } = context
       signal.throwIfAborted()
-      let request = this.createRequests.get(input.requestId)
+      const scope = clientScopeKey(context)
+      const requestKey = `${scope}\0${input.requestId}`
+      let request = this.createRequests.get(requestKey)
       if (request === undefined) {
-        request = { input, sessionId: sessionIdForRequest(input.requestId), initializeTitle: false }
-        this.createRequests.set(input.requestId, request)
+        request = { input, sessionId: sessionIdForRequest(scope, input.requestId), initializeTitle: false }
+        this.createRequests.set(requestKey, request)
       } else if (request.input.title !== input.title) {
-        throw Object.assign(new Error('SessionCatalog.create requestId conflicts with an earlier input'), {
-          code: 'REVISION_CONFLICT',
-        })
+        throw new CapabilityFailure(
+          'REVISION_CONFLICT',
+          'SessionCatalog.create requestId conflicts with an earlier input in this client scope',
+        )
       }
       if (request.result !== undefined) return request.result
 
@@ -339,9 +352,10 @@ export class DshSessionProtocolAdapter {
 
 function descriptorOf(
   participantId: string,
-  header: DshSessionHeader,
-  events: readonly DshSessionEvent[],
+  inspection: DshSessionInspection,
 ): SessionDescriptor {
+  const { meta: header, events } = inspection
+  const inheritedEventCount = inspection.inheritedEventCount ?? header.seedLength
   const titleEvent = [...events].reverse().find(event => event.type === 'session/title'
     && typeof record(event.data)?.title === 'string')
   const title = record(titleEvent?.data)?.title
@@ -356,12 +370,35 @@ function descriptorOf(
     ...(header.parentSession === undefined ? {} : {
       lineage: Object.freeze({
         parent: Object.freeze({ provider: participantId, id: header.parentSession }),
-        ...(header.seedLength === undefined || header.seedLength === 0
+        ...(inheritedEventCount === undefined || inheritedEventCount === 0
           ? {}
-          : { through: String(header.seedLength - 1) }),
+          : { through: String(inheritedEventCount - 1) }),
       }),
     }),
   })
+}
+
+function descriptorOfSummary(
+  participantId: string,
+  summary: DshSessionSummary & { readonly updatedAt: number },
+): SessionDescriptor {
+  const title = summary.projections?.values.title
+  return Object.freeze({
+    session: Object.freeze({ provider: participantId, id: summary.sessionId }),
+    ...(typeof title === 'string' && title.trim() !== '' ? { title } : {}),
+    state: 'available',
+    revision: Math.max(0, (summary.projections?.asOfSeq ?? -1) + 1),
+    updatedAt: new Date(summary.updatedAt).toISOString(),
+    ...(summary.parentSessionId === undefined ? {} : {
+      lineage: Object.freeze({
+        parent: Object.freeze({ provider: participantId, id: summary.parentSessionId }),
+      }),
+    }),
+  })
+}
+
+function hasBodyFreeDescriptor(summary: DshSessionSummary): summary is DshSessionSummary & { readonly updatedAt: number } {
+  return Number.isFinite(summary.updatedAt)
 }
 
 function eventEnvelope(
@@ -405,8 +442,13 @@ function invalidCursor(message: string): never {
   throw new TypeError(message)
 }
 
-function sessionIdForRequest(requestId: string): string {
-  const digest = createHash('sha256').update(requestId).digest('hex').slice(0, 32)
+function clientScopeKey(context: CapabilityHandlerContext): string {
+  const { endpoint, participantId } = context.binding.consumer
+  return `${endpoint.id}\0${endpoint.instanceId}\0${participantId}`
+}
+
+function sessionIdForRequest(scope: string, requestId: string): string {
+  const digest = createHash('sha256').update(scope).update('\0').update(requestId).digest('hex').slice(0, 32)
   return `session-std-${digest}`
 }
 

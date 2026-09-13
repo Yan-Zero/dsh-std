@@ -138,4 +138,37 @@ describe('@dsh-std/lifecycle', () => {
     expect(abortedAtDeactivate).toBe(true)
     expect(signal?.reason).toBe('test stop')
   })
+
+  it('waits for an already-started disposer and shares repeated cleanup settlement', async () => {
+    const { protocols, manifest } = fixture()
+    const drivers = new ActivationDriverRegistry()
+    let releaseCleanup = (): void => undefined
+    const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve })
+    let dispose: (() => Promise<void>) | undefined
+    let calls = 0
+    drivers.register({
+      id: 'example.driver', apiVersion: 'adapter.test/v1alpha1', kind: 'Entrypoint',
+      activate({ context }) {
+        context.protocols.implement({ apiVersion: 'example.dsh/v1alpha1', kind: 'Service' }, {})
+        dispose = context.scope.add(async () => {
+          calls++
+          await cleanupGate
+        })
+      },
+    })
+    const coordinator = new LifecycleCoordinator(protocols, drivers)
+    const [handle] = await coordinator.activate(compose({ manifests: [manifest], protocols, drivers: drivers.descriptors() }))
+    const first = dispose?.()
+    const deactivation = handle?.deactivate('test stop')
+    expect(calls).toBe(1)
+    let settled = false
+    void deactivation?.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    releaseCleanup()
+    await expect(first).resolves.toBeUndefined()
+    await expect(deactivation).resolves.toBeUndefined()
+    await expect(dispose?.()).resolves.toBeUndefined()
+    expect(calls).toBe(1)
+  })
 })
