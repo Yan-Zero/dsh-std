@@ -10,6 +10,10 @@ on:
         description: Commit immediately before the version increases (defaults to HEAD^)
         required: false
         type: string
+      release_commit:
+        description: Commit that introduced the package versions (defaults to the workflow commit)
+        required: false
+        type: string
 
 concurrency:
   group: npm-release
@@ -36,6 +40,7 @@ jobs:
         env:
           PUSH_BEFORE: ${{ github.event.before }}
           DISPATCH_BEFORE: ${{ inputs.before }}
+          DISPATCH_RELEASE_COMMIT: ${{ inputs.release_commit }}
         shell: bash
         run: |
           set -euo pipefail
@@ -44,6 +49,14 @@ jobs:
             before="$DISPATCH_BEFORE"
             if [[ -z "$before" ]]; then
               before="$(git rev-parse HEAD^)"
+            fi
+          fi
+          release_sha="$GITHUB_SHA"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ -n "$DISPATCH_RELEASE_COMMIT" ]]; then
+            release_sha="$(git rev-parse "$DISPATCH_RELEASE_COMMIT^{commit}")"
+            if ! git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"; then
+              echo "Release commit $release_sha is not an ancestor of workflow commit $GITHUB_SHA" >&2
+              exit 1
             fi
           fi
           if [[ ! "$before" =~ ^[0-9a-fA-F]{40}$ ]] || [[ "$before" =~ ^0+$ ]]; then
@@ -55,6 +68,7 @@ jobs:
           node scripts/release-plan.mjs --before "$before" --output "$RUNNER_TEMP/release-plan.json"
           count="$(node -p "require(process.env.RUNNER_TEMP + '/release-plan.json').length")"
           echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -78,6 +92,7 @@ jobs:
           PLAN_FILE: ${{ runner.temp }}/release-plan.json
           ARTIFACT_DIR: ${{ runner.temp }}/release-artifacts
           ARTIFACTS_FILE: ${{ runner.temp }}/release-artifacts.tsv
+          RELEASE_SHA: ${{ steps.plan.outputs.release_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -92,7 +107,7 @@ jobs:
             safe="${package#@}"
             safe="${safe//\//-}"
             tarball="$ARTIFACT_DIR/$safe-$version.tgz"
-            release_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+            release_epoch="$(git show -s --format=%ct "$RELEASE_SHA")"
             find "$directory" -type f -exec touch -d "@$release_epoch" {} +
             pnpm --filter "$package" pack --out "$tarball"
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
@@ -112,6 +127,7 @@ jobs:
         env:
           ARTIFACTS_FILE: ${{ runner.temp }}/release-artifacts.tsv
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.plan.outputs.release_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -122,8 +138,8 @@ jobs:
             attach_tarball=true
             if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
               target="$(git rev-list -n 1 "$tag")"
-              if [[ "$target" != "$GITHUB_SHA" ]]; then
-                echo "Tag $tag already points to $target instead of $GITHUB_SHA" >&2
+              if [[ "$target" != "$RELEASE_SHA" ]]; then
+                echo "Tag $tag already points to $target instead of $RELEASE_SHA" >&2
                 exit 1
               fi
               tag_exists=true
@@ -154,7 +170,7 @@ jobs:
             rm -f "$npm_error"
 
             if [[ "$tag_exists" != true ]]; then
-              git tag --annotate "$tag" --message "Release $tag" "$GITHUB_SHA"
+              git tag --annotate "$tag" --message "Release $tag" "$RELEASE_SHA"
               git push origin "refs/tags/$tag"
             fi
 
