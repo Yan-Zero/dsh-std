@@ -2,6 +2,7 @@
 
 ## 0.1.1-rc.3
 
+- Added the built-in DSH Skill provider projection for `skills.dsh/v1alpha1` resources, with package-contained lazy body reads and activation-owned catalog invalidation.
 - Fixed `SessionCatalog.create` retries overwriting later title edits. Create receipts preserve the existing request-to-session mapping, reject changed input, and recover incomplete native operations without rewriting an existing title.
 - Adapted the Host and browser integration to DeepSeek Harness `0.1.5-rc.2`, including generic-file-aware model dispatch, branded command event positions, and awaitable browser facet cleanup, while retaining the previous `0.1.2` peer line and Session-summary fallback.
 - Made Session catalog listing body-free through DSH projection summaries, restored exact fork lineage through `inheritedEventCount`, and isolated create idempotency by consumer endpoint instance and participant.

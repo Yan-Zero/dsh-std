@@ -44,6 +44,7 @@ Core 只负责可拔插协议的声明与协商。其他提案可以使用 core�
 | `@dsh-std/model` | [Model Provider Catalog](model.zh.md) | 草案 |
 | `@dsh-std/tool` | [Tool Discovery](tool.zh.md) | 草案 |
 | `@dsh-std/session` | [Session Catalog, History and Events](session.zh.md) | 草案 |
+| `@dsh-std/skill` | [Skill Resources](skill.zh.md) | 草案 |
 | `@dsh-std/presentation` | [Presentation Operations](presentation.zh.md) | 草案 |
 | `@dsh-std/ui` | [UI Facets and Contributions](ui-contribution.zh.md) | 草案 |
 | `@dsh-std/ui-browser` | [Browser-realm UI Surfaces](ui-browser.zh.md) | 草案 |

@@ -8,6 +8,7 @@ import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type SkillRegistry from '@deepseek-ai/dsh-skill'
 import type {
   ToolDefinition,
   ToolExecutionResult as DshToolExecutionResult,
@@ -131,6 +132,15 @@ import {
 import { register as registerMessages } from '@dsh-std/messages'
 import { register as registerStorage } from '@dsh-std/storage'
 import {
+  API_VERSION as SKILL_API_VERSION,
+  KIND as SKILL_KIND,
+  assertSkillPublication,
+  extensionDefinition as skillExtensionDefinition,
+  register as registerSkill,
+  resourceSupport as skillResourceSupport,
+  type SkillResource,
+} from '@dsh-std/skill'
+import {
   register as registerWorkspace,
   workspaceProviderExtensionDefinition,
 } from '@dsh-std/workspace'
@@ -155,6 +165,10 @@ import {
 } from '@dsh-std/ui-browser'
 import { ADAPTER_VERSION } from './version.js'
 import {
+  installDshStandardSkillProvider,
+  type DshStandardSkillProvider,
+} from './skill-provider.js'
+import {
   writeWorkspaceBytes,
   type WorkspaceFileSystem,
   type WorkspaceTarget,
@@ -177,6 +191,8 @@ export const DSH_SESSION_API_VERSION = SESSION_API_VERSION
 export const DSH_PRESENTATION_API_VERSION = PRESENTATION_API_VERSION
 export const DSH_UI_API_VERSION = UI_API_VERSION
 export const DSH_UI_CONTRIBUTION_HOST_KIND = UI_CONTRIBUTION_HOST_KIND
+export const DSH_SKILL_API_VERSION = SKILL_API_VERSION
+export const DSH_SKILL_KIND = SKILL_KIND
 const ADAPTER_COMPONENT = 'std.dsh.adapter-dsh'
 const ADAPTER_PARTICIPANT = `${ADAPTER_COMPONENT}/runtime`
 const BROWSER_MODULE_ROUTE = '/dsh-std/browser-modules'
@@ -219,6 +235,8 @@ export interface DshFacetProjection {
 export interface DshFacetPublication {
   readonly manifest: ComponentManifest
   readonly facet: string
+  /** Absolute root of the package containing the manifest and its inert assets. */
+  readonly packageRoot?: string
   activate(context: ActivationContext): void | Promise<void>
   deactivate?(reason: string): void | Promise<void>
   snapshot?(): DshFacetProjection | Promise<DshFacetProjection>
@@ -952,6 +970,8 @@ export class DshStandardAdapter extends TypertRemoteService {
   private readonly sessionEvents = new DshSessionEventRegistry()
   private readonly sessionProtocols: DshSessionProtocolAdapter
   private readonly commandExtensions: DshCommandExtensionRegistry
+  private readonly skillExtensions: DshStandardSkillProvider | undefined
+  private readonly disposeSkillProvider: (() => void) | undefined
   private readonly commandProviderDisposers = new Set<() => void>()
   private readonly uiProviders = new Map<string, UiContributionProvider>()
   private readonly uiBindings = new Map<string, Set<BoundContributionHost>>()
@@ -978,10 +998,18 @@ export class DshStandardAdapter extends TypertRemoteService {
     const profileBaseUrl = config.profileBaseUrl?.trim() || ctx.baseUrl
     const profile = config.profile?.trim() || profileFromBaseUrl(profileBaseUrl)
     this.commandExtensions = new DshCommandExtensionRegistry()
+    const skills = ctx.get('skills') as SkillRegistry | undefined
+    const skillBinding = skills === undefined ? undefined : installDshStandardSkillProvider(skills)
+    this.skillExtensions = skillBinding?.provider
+    this.disposeSkillProvider = skillBinding?.dispose
     const implementations = this.standardImplementations()
     const declaration = defineProtocolDeclaration({
       participant: { id: ADAPTER_PARTICIPANT },
-      supports: [commandResourceSupport, ...implementations.map(implementation => implementation.protocol)],
+      supports: [
+        commandResourceSupport,
+        ...(this.skillExtensions === undefined ? [] : [skillResourceSupport]),
+        ...implementations.map(implementation => implementation.protocol),
+      ],
     })
     this.runtime = Object.freeze({
       id: config.runtimeId?.trim() || 'dsh', instanceId,
@@ -1089,6 +1117,7 @@ export class DshStandardAdapter extends TypertRemoteService {
       }
       this.manifests.clear()
       this.browserModules.clear()
+      this.disposeSkillProvider?.()
       for (const dispose of [...this.commandProviderDisposers].reverse()) dispose()
       for (const dispose of [...this.uiProviderDisposers].reverse()) await dispose()
     }, '@dsh-std/adapter-dsh lifecycle')
@@ -1211,6 +1240,7 @@ export class DshStandardAdapter extends TypertRemoteService {
           disposers.push(await this.mount({
             manifest,
             facet: facet.name,
+            packageRoot: packageDir,
             activate: context => module.activate(context),
             ...(module.deactivate === undefined ? {} : { deactivate: reason => module.deactivate?.(reason) }),
             ...(module.snapshot === undefined ? {} : { snapshot: () => module.snapshot?.() ?? {} }),
@@ -1296,7 +1326,7 @@ export class DshStandardAdapter extends TypertRemoteService {
     }
     let disposeProductExtensions: () => void
     try {
-      disposeProductExtensions = this.installProductExtensions(facet, publication)
+      disposeProductExtensions = this.installProductExtensions(facet, publication, input.packageRoot)
     } catch (error) {
       unregisterEndpoint()
       await handle.deactivate('product extension publication failed')
@@ -1508,6 +1538,7 @@ export class DshStandardAdapter extends TypertRemoteService {
   private installProductExtensions(
     facet: NonNullable<ReturnType<typeof findFacet>>,
     publication: NonNullable<ReturnType<PublicationRegistry['get']>>,
+    packageRoot: string | undefined,
   ): () => void {
     const disposers: Array<() => void> = []
     try {
@@ -1592,6 +1623,23 @@ export class DshStandardAdapter extends TypertRemoteService {
             extension.metadata.name,
             publication.identity.component,
             replay,
+          ))
+        }
+        if (sameProtocol(extension, { apiVersion: SKILL_API_VERSION, kind: SKILL_KIND })) {
+          const published = publication.extensions.find(row => row.extension === extension
+            || (sameProtocol(row.extension, extension) && row.extension.metadata.name === extension.metadata.name))
+          if (published === undefined) continue
+          assertSkillPublication(published.handler)
+          if (this.skillExtensions === undefined) {
+            throw new Error('Skill resource requires the DSH skills service')
+          }
+          if (packageRoot === undefined) {
+            throw new Error(`Skill ${JSON.stringify(extension.metadata.name)} requires its packageRoot`)
+          }
+          disposers.push(this.skillExtensions.register(
+            extension as SkillResource,
+            packageRoot,
+            publication.identity,
           ))
         }
       }
@@ -1687,6 +1735,7 @@ export function createDshProtocolCatalog(): ProtocolCatalog {
   registerModel(catalog)
   registerPresentation(catalog)
   registerStorage(catalog)
+  registerSkill(catalog)
   registerWorkspace(catalog)
   registerSessionCatalog(catalog)
   registerSessionHistory(catalog)
@@ -1702,6 +1751,7 @@ export function createDshManifestCatalog(): ManifestDefinitionCatalog {
   catalog.registerExtension(toolExtensionDefinition)
   catalog.registerExtension(toolOverrideExtensionDefinition)
   catalog.registerExtension(sessionEventExtensionDefinition)
+  catalog.registerExtension(skillExtensionDefinition)
   catalog.registerExtension(workspaceProviderExtensionDefinition)
   registerUiManifest(catalog)
   registerBrowserUiManifest(catalog)

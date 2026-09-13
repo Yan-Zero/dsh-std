@@ -1,0 +1,22 @@
+{
+  "name": "@dsh-std/skill",
+  "version": "0.1.1-rc.1",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/Yan-Zero/dsh-std.git", "directory": "packages/skill" },
+  "publishConfig": { "access": "public" },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "files": ["lib", "CHANGELOG.md"],
+  "scripts": {
+    "build": "pnpm run typecheck && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@dsh-std/core": "workspace:^",
+    "@dsh-std/manifest": "workspace:^"
+  },
+  "engines": { "node": "^22.19 || >=24" }
+}

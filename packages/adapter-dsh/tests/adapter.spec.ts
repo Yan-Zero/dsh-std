@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { defineProtocolDeclaration } from '@dsh-std/core'
 import { defineComponentManifest } from '@dsh-std/manifest'
@@ -178,6 +179,7 @@ async function fixture(
   } as never)
   ctx.provide('tools', tools as never)
   await ctx.plugin(CommandRuntime)
+  await ctx.plugin(SkillRegistry)
   const adapter = new DshStandardAdapter(ctx, { profile })
   const manifest = defineComponentManifest({
     apiVersion: 'manifest.dsh/internal/v1alpha1', kind: 'Component',
@@ -241,6 +243,66 @@ async function fixture(
 }
 
 describe('@dsh-std/adapter-dsh', () => {
+  it('projects package-local standard Skills lazily and retracts them on unload', async () => {
+    const { ctx, adapter } = await fixture()
+    const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-skill-profile-'))
+    temporaryRoots.push(profileDir)
+    const componentDir = join(profileDir, 'node_modules', 'skill-component')
+    const skillDir = join(componentDir, 'skills', 'portable-skill')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+      name: 'fixture-profile', private: true, dependencies: { 'skill-component': '1.0.0' },
+    }))
+    writeFileSync(join(componentDir, 'package.json'), JSON.stringify({
+      name: 'skill-component', version: '1.0.0', type: 'module',
+    }))
+    writeFileSync(join(componentDir, 'dsh-plugin.json'), JSON.stringify({
+      $schema: 'urn:example:dsh-plugin:0.15', manifestVersion: '0.15',
+      id: 'example.skill.component', name: 'Skill Component', version: '1.0.0',
+      facets: { host: { entry: 'standard.js', apiVersion: 'v1alpha1' } },
+      contributes: {
+        'x-dsh-std.skills': [{
+          id: 'example.skill.component.portable-skill',
+          apiVersion: 'skills.dsh/v1alpha1', kind: 'Skill', name: 'portable-skill',
+          spec: {
+            description: 'Load portable guidance only when requested.',
+            entry: 'skills/portable-skill/SKILL.md',
+            invocation: { model: true, user: false },
+          },
+        }],
+      },
+    }))
+    writeFileSync(join(componentDir, 'standard.js'), [
+      'export default {',
+      '  activate(context) {',
+      '    context.extensions.publish({ apiVersion: "skills.dsh/v1alpha1", kind: "Skill" }, "portable-skill", null)',
+      '  },',
+      '}',
+      '',
+    ].join('\n'))
+    const skillPath = join(skillDir, 'SKILL.md')
+    writeFileSync(skillPath, 'initial body')
+
+    const disposers = await adapter.mountProfileComponents(profileDir)
+    expect(await ctx.skills.list()).toEqual(expect.arrayContaining([expect.objectContaining({
+      name: 'portable-skill',
+      description: 'Load portable guidance only when requested.',
+      invocation: { modelInvocable: true, userInvocable: false },
+      provider: 'dsh-std',
+    })]))
+
+    writeFileSync(skillPath, 'body loaded after catalog discovery')
+    await expect(ctx.skills.get('portable-skill')).resolves.toEqual(expect.objectContaining({
+      name: 'portable-skill', content: 'body loaded after catalog discovery',
+    }))
+
+    writeFileSync(skillPath, Uint8Array.of(0xff))
+    await expect(ctx.skills.get('portable-skill')).rejects.toThrow()
+
+    for (const dispose of [...disposers].reverse()) await dispose()
+    await expect(ctx.skills.get('portable-skill')).resolves.toBeUndefined()
+  })
+
   it('discovers portable facet modules from installed profile dependencies', async () => {
     const { adapter } = await fixture()
     const profileDir = mkdtempSync(join(tmpdir(), 'dsh-std-profile-'))

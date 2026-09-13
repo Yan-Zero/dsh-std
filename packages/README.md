@@ -17,6 +17,7 @@ Each package owns one independently versioned part of the proposal. Consumers sh
 | [`@dsh-std/messages`](messages/README.md) | Read-only message observation events | No |
 | [`@dsh-std/model`](model/README.md) | ModelProvider resources and the shared ModelCatalog | No |
 | [`@dsh-std/tool`](tool/README.md) | Tool discovery and live availability | No |
+| [`@dsh-std/skill`](skill/README.md) | Declarative, lazily loaded Skill instruction resources | No |
 | [`@dsh-std/presentation`](presentation/README.md) | Invocation-scoped user-facing operations | No |
 | [`@dsh-std/connection`](connection/README.md) | Endpoint negotiation and implementation-neutral invocation | No |
 | [`@dsh-std/adapter-dsh`](adapter-dsh/README.md) | DeepSeek Harness and Cordis integration | Yes |

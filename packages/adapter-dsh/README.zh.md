@@ -25,7 +25,7 @@ dsh plugin --profile web add <standard-component>
 
 Entrypoint 在激活期间通过 `context.protocols.implement()` 与 `context.extensions.publish()` 暂存事实。只有激活成功、静态范围校验及协议协商通过后，它们才越过 publication barrier，进入 live publication 与 connection offer。激活失败或卸载会按 activation instance owner 撤销全部结果。
 
-当前 DSH 映射实现 `CommandRuntime`、`ModelCatalog`、`SessionCatalog` 的 list/get/create/rename、`SessionHistory` 的 read/follow、本地 `Tool` / `ToolOverride` activation 与 browser-local UI contribution，并在协议目录中装载 `MessageObserver`、`LocalStorage` 与 Presentation definitions。Session descriptor 与 history 来自 `sessionController` 的 cold-safe list/inspect/follow seam；adapter 不宣称 DSH 尚未提供同等删除、watch 或幂等 fork 语义的 operation。DSH 原生 event 对 portable reader 标记为 ignorable，标准组件声明的 `SessionEvent` 则保留其 replay 分类。
+当前 DSH 映射实现 `CommandRuntime`、`ModelCatalog`、`SessionCatalog` 的 list/get/create/rename、`SessionHistory` 的 read/follow、本地 `Tool` / `ToolOverride` activation、package-local lazy `Skill` resource 与 browser-local UI contribution，并在协议目录中装载 `MessageObserver`、`LocalStorage` 与 Presentation definitions。Skill resource 自动投影到 DSH 原生 provider registry；用户无需再安装一个 bridge 包，而可移植组件仍只依赖 `@dsh-std/skill`。Session descriptor 与 history 来自 `sessionController` 的 cold-safe list/inspect/follow seam；adapter 不宣称 DSH 尚未提供同等删除、watch 或幂等 fork 语义的 operation。DSH 原生 event 对 portable reader 标记为 ignorable，标准组件声明的 `SessionEvent` 则保留其 replay 分类。
 
 `SessionCatalog.create` 按 request ID 保存初始输入与已完成结果，保留原有的跨连接 request ID 到 Session ID 映射。重试直接返回原结果，不撤销后续改名；同一 ID 改变输入会被拒绝。这些请求记录保存在 adapter 实例中。Adapter 重建后，request ID 若对应已有 Session，则返回当前 descriptor，不再初始化标题；跨重启重放原始结果和核对原始输入需要持久化请求记录，当前 adapter 尚未保存这种记录。Request ID 仍由该 adapter 的所有 consumer 共享，调用方应使用全局唯一的 request ID。
 

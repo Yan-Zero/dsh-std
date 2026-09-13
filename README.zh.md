@@ -82,6 +82,10 @@ pnpm install
 pnpm check
 ```
 
+## 发布
+
+发布版本直接维护在各个 `packages/*/package.json` 中，release workflow 不自动改写版本号。代码 push 到 `main` 后，workflow 将这些版本与 push 前的 commit 比较，对每个确实升高的版本依次打包、通过 OIDC 发布、创建 tag 和 GitHub Release。预发布版本以其预发布标识作为 npm dist-tag（`rc`、`alpha` 或 `beta`），稳定版本使用 `latest`。
+
 ## 许可证
 
 [MIT](LICENSE)
