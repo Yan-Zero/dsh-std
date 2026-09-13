@@ -92,6 +92,8 @@ jobs:
             safe="${package#@}"
             safe="${safe//\//-}"
             tarball="$ARTIFACT_DIR/$safe-$version.tgz"
+            release_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+            find "$directory" -type f -exec touch -d "@$release_epoch" {} +
             pnpm --filter "$package" pack --out "$tarball"
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
               "$directory" "$package" "$version" "$tag" "$prerelease" "$dist_tag" "$tarball" >> "$ARTIFACTS_FILE"
@@ -117,6 +119,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 
           while IFS=$'\t' read -r directory package version tag prerelease dist_tag tarball; do
+            attach_tarball=true
             if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
               target="$(git rev-list -n 1 "$tag")"
               if [[ "$target" != "$GITHUB_SHA" ]]; then
@@ -132,10 +135,15 @@ jobs:
             npm_error="$(mktemp)"
             if registry_integrity="$(npm view "$package@$version" dist.integrity 2>"$npm_error")" && [[ -n "$registry_integrity" ]]; then
               if [[ "$registry_integrity" != "$local_integrity" ]]; then
-                echo "$package@$version already exists with different package bytes" >&2
-                exit 1
+                if [[ "$tag_exists" != true ]]; then
+                  echo "$package@$version already exists with different package bytes and has no tag for this release commit" >&2
+                  exit 1
+                fi
+                echo "$package@$version was already published from this tagged release commit; skipping the rebuilt tarball."
+                attach_tarball=false
+              else
+                echo "$package@$version is already published with matching bytes."
               fi
-              echo "$package@$version is already published with matching bytes."
             else
               if ! grep -Eq 'E404|404 Not Found' "$npm_error"; then
                 cat "$npm_error" >&2
@@ -151,12 +159,18 @@ jobs:
             fi
 
             if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" "$tarball" --clobber
+              if [[ "$attach_tarball" == true ]]; then
+                gh release upload "$tag" "$tarball" --clobber
+              fi
             else
               args=(--title "$tag" --generate-notes --verify-tag)
               if [[ "$prerelease" == true ]]; then
                 args+=(--prerelease)
               fi
-              gh release create "$tag" "$tarball" "${args[@]}"
+              if [[ "$attach_tarball" == true ]]; then
+                gh release create "$tag" "$tarball" "${args[@]}"
+              else
+                gh release create "$tag" "${args[@]}"
+              fi
             fi
           done < "$ARTIFACTS_FILE"
