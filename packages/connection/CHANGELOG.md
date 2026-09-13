@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/connection` are recorded here.
 
+## 0.1.1-rc.3
+
+- Added `CapabilityFailure` so definition-owned business codes and lossless JSON details survive capability dispatch, while undeclared implementation exceptions retain the existing `handler-failed` containment behavior.
+
 ## 0.1.1-rc.2
 
 - Plan digests now hash the digest-stripped agreement with SHA-256 over its deterministic CBOR encoding (RFC 8949 core deterministic subset), rendered as `sha256:` plus 64 lowercase hex digits, replacing the 32-bit FNV-1a hash of a JSON-ish canonical string that covered only part of the agreement.

@@ -55,6 +55,7 @@ import {
   type BrowserUiView,
   type BrowserUiViewBinding,
 } from '@dsh-std/ui-browser'
+import { ADAPTER_VERSION } from './version.js'
 
 export const BROWSER_UI_API_VERSION = BROWSER_UI_PROTOCOL_VERSION
 export const BROWSER_SETTINGS_SECTION_KIND = SETTINGS_SECTION.kind
@@ -244,7 +245,7 @@ export class DshBrowserUiRuntime extends Service implements DshBrowserUiRuntimeF
         throw new Error(`DSH browser UI adapter cannot provide ${requirement.apiVersion} ${requirement.kind}`)
       }
     }
-    const protocols = new ProtocolCatalog({ name: '@dsh-std/adapter-dsh/client', version: '0.1.0' })
+    const protocols = new ProtocolCatalog({ name: '@dsh-std/adapter-dsh/client', version: ADAPTER_VERSION })
     registerUi(protocols)
     const providerDeclarations = this.providers.map(provider => defineProtocolDeclaration({
         participant: { id: provider.participantId },
@@ -669,19 +670,32 @@ function activationContext(
 
 class BrowserCleanupScope implements CleanupScope {
   private readonly controller = new AbortController()
-  private readonly cleanups: Array<() => void | Promise<void>> = []
+  private readonly cleanups: Array<() => Promise<void>> = []
+  private closing: Promise<void> | undefined
   get signal(): AbortSignal { return this.controller.signal }
-  add(dispose: () => void | Promise<void>): () => void {
+  add(dispose: () => void | Promise<void>): () => Promise<void> {
     if (this.controller.signal.aborted) throw new Error('Browser UI facet cleanup scope is closed')
-    this.cleanups.push(dispose)
-    return () => {
-      const index = this.cleanups.indexOf(dispose)
-      if (index >= 0) this.cleanups.splice(index, 1)
+    let settlement: Promise<void> | undefined
+    const once = (): Promise<void> => {
+      if (settlement !== undefined) return settlement
+      try {
+        settlement = Promise.resolve(dispose())
+      } catch (error) {
+        settlement = Promise.reject(error)
+      }
+      void settlement.catch(() => undefined)
+      return settlement
     }
+    this.cleanups.push(once)
+    return once
   }
-  async close(reason: string): Promise<void> {
-    if (this.controller.signal.aborted) return
+  close(reason: string): Promise<void> {
+    if (this.closing !== undefined) return this.closing
     this.controller.abort(reason)
+    this.closing = this.drain()
+    return this.closing
+  }
+  private async drain(): Promise<void> {
     const failures: unknown[] = []
     for (const dispose of this.cleanups.splice(0).reverse()) {
       try { await dispose() } catch (error) { failures.push(error) }

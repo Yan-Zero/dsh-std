@@ -8,7 +8,7 @@ DeepSeek Harness 的产品适配层。设计见 [DeepSeek Harness Adapter](../..
 
 这个包自身是 DSH profile bundle；安装后由 `cordis.patch.yml` 激活。adapter 会读取当前 profile 的普通 dependencies，发现并校验其中的 Community v0.15 `dsh-plugin.json`，协商 `requires.contracts`，再装载 `facets.host.entry`。标准插件本身不需要声明 `dsh.bundle`，也不需要引用这个 adapter。
 
-在具备 browser surface 的 profile 中，adapter 自己的 DSH browser half 会读取标准 `browser.ui.dsh/v1alpha1 LocalModule` 声明，提供 package 内的模块产物，并通过 DSH `0.1.2-alpha.2` 的 API Gateway、Session Controller、client module system 与 Cordis lifecycle 激活。组件不需要 Cordis 根 Loader entry，也不需要 `dsh.client` metadata。TUI 与 headless profile 不会装载这些模块；仅 browser transport 与 UI peer 为 optional，Host adapter 则要求 `sessionController` 服务。
+在具备 browser surface 的 profile 中，adapter 自己的 DSH browser half 会读取标准 `browser.ui.dsh/v1alpha1 LocalModule` 声明，提供 package 内的模块产物，并通过 DSH `0.1.5-rc.2` 的 API Gateway、Session Controller、client module system 与 Cordis lifecycle 激活。组件不需要 Cordis 根 Loader entry，也不需要 `dsh.client` metadata。TUI 与 headless profile 不会装载这些模块；仅 browser transport 与 UI peer 为 optional，Host adapter 则要求 `sessionController` 服务。
 
 Browser half 实现可选的 `@dsh-std/ui-browser` `SettingsSection` 与 `ToolCallView` surfaces。它用 `slots.inject()` 等待对应的原生 slot，通过协商为 browser-realm facet 签发 activation-scoped `ui.dsh/v1alpha1 ContributionHost`，并在 facet 卸载时撤销全部 slot registration。组件只导入 surface 协议包，不导入本 adapter；原始 DSH slot 名保留在 adapter 内。DSH 的“插件”页会增加独立的“标准组件”清单，显示标准 lifecycle 状态，而不会伪造 Cordis Loader row。
 

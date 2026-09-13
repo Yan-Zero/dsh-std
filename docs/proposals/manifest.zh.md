@@ -53,6 +53,8 @@ Facet 至少可以声明：
 
 协议引用使用 `apiVersion + kind`。Manifest schema 只校验坐标外壳；协议专属 `spec` 由相应 `ProtocolDefinition` 校验。
 
+Activation、protocol requirement/support、extension 与 permission 中的 `spec` 都必须（MUST）是 lossless JSON 数据。Manifest 层必须在 definition 或 executable facet 能观察它们之前拒绝 Date、Map、函数、循环引用和嵌套 `undefined` 等 host-language 值；通过 JSON 文本解析并不免除 programmatic `ComponentManifest` builder 的同一检查。Manifest 层不得重写协议拥有的字段。
+
 协议 group 不必先进入某个公共目录才能出现在 Manifest。Host 若取得相应 definition，就按 core 规则校验和协商；未取得 definition 时，required requirement 阻止兼容，optional requirement 被报告为未满足。未知 support 不构成可用实现。
 
 Manifest 中的 potential support 只是 facet 可以发布的静态上限。Facet 激活后仍必须在 activation scope 内登记 implementation，并越过 publication barrier，才能产生 live support。
@@ -104,6 +106,8 @@ interface CommunityContractReference extends ApiReference {
 该结构按以下规则进入共同组件模型：
 
 `requires`、`permissions`、`contributes` 和 `subscriptions` 是可选容器；`requires.contracts` 也是可选数组。缺少这些字段必须与对应空对象或空数组产生等价 projection。Host 不得因省略空容器而拒绝 Manifest，也不得从字段缺失推断未声明的 requirement、permission、contribution 或 subscription。
+
+TypeScript API 使用宽松的 `PluginManifestInput` 表示待校验 JSON，并使用规范化的 `PluginManifest` 表示 `parseManifest` / `defineManifest` 的结果。后者必须恢复首版 API 已承诺的 `requires.contracts`、`permissions`、`contributes.commands` 与 `subscriptions` 空容器，使旧 Plugin 可以直接读取这些成员；规范化不得改变非空数据或 namespaced contribution point。
 
 - `id`、`name`、`version`、`license`、`source` 和 `artifact` 形成 component metadata；
 - `facets.host.entry` 形成 `host` facet 的 activation；

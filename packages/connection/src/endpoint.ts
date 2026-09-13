@@ -5,6 +5,7 @@ import {
   type ProtocolSupport,
 } from '@dsh-std/core'
 import {
+  CapabilityFailure,
   ConnectionInvocationError,
   type CapabilityDispatch,
   type CapabilityImplementation,
@@ -88,7 +89,7 @@ export class StandardEndpointRuntime implements ConnectionEndpoint {
         progress: invocation.progress,
       })) as TOutput
     } catch (error) {
-      if (error instanceof ConnectionInvocationError) throw error
+      if (error instanceof ConnectionInvocationError || error instanceof CapabilityFailure) throw error
       throw new ConnectionInvocationError('handler-failed', error instanceof Error ? error.message : String(error), { cause: error })
     }
   }

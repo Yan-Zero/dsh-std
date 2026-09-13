@@ -700,7 +700,7 @@ export default {
           handler: async invocation => {
             const result = await execute(invocation)
             return result.kind === 'success'
-              ? { kind: 'success', ...(result.text === undefined ? {} : { text: result.text }), ...(result.sourceEventSeq === undefined ? {} : { sourceEventSeq: result.sourceEventSeq }) }
+              ? { kind: 'success', ...(result.text === undefined ? {} : { text: result.text }), ...(result.sourceEventSeq === undefined ? {} : { sourceEventSeq: result.sourceEventSeq as never }) }
               : { kind: 'error', text: result.text ?? 'command failed' }
           },
         })

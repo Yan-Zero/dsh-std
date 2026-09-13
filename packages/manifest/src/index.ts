@@ -8,9 +8,11 @@ import {
   type VersionRange,
   assertVersionRange,
   parseSemanticVersion,
+  validateProtocolJsonValue,
 } from '@dsh-std/core'
 export const COMMUNITY_V015_MANIFEST_VERSION = '0.15'
 export const COMPONENT_API_VERSION = 'manifest.dsh/internal/v1alpha1'
+export const PACKAGE_VERSION = '0.1.1-rc.3'
 export const COMMUNITY_PERMISSION_API_VERSION = 'community.dsh/v1alpha1'
 export const COMMUNITY_PERMISSION_KIND = 'Permission'
 export const COMMUNITY_CONTRIBUTION_ID_LABEL = 'dsh.std/contribution-id'
@@ -37,7 +39,7 @@ export interface CommunityCommandContribution {
 
 export type CommunitySubscription = string | (ApiReference & { readonly scope?: string })
 
-export interface CommunityPluginManifestV015 {
+export interface CommunityPluginManifestV015Input {
   /** Draft schema identifier. It is not fetched while loading the plugin. */
   readonly $schema: string
   readonly manifestVersion: typeof COMMUNITY_V015_MANIFEST_VERSION
@@ -68,7 +70,27 @@ export interface CommunityPluginManifestV015 {
   }[]
 }
 
+/** Canonical v0.15 value, preserving the original required-container API. */
+export interface CommunityPluginManifestV015 extends Omit<
+  CommunityPluginManifestV015Input,
+  'requires' | 'permissions' | 'contributes' | 'subscriptions'
+> {
+  readonly requires: {
+    readonly contracts: readonly CommunityContractReference[]
+    readonly services?: readonly never[]
+  }
+  readonly permissions: readonly CommunityPermissionRequest[]
+  readonly contributes: {
+    readonly commands: readonly CommunityCommandContribution[]
+    readonly panels?: readonly never[]
+  } & Readonly<Record<string, readonly unknown[]>>
+  readonly subscriptions: readonly CommunitySubscription[]
+}
+
+export type PluginManifestInput = CommunityPluginManifestV015Input
 export type PluginManifest = CommunityPluginManifestV015
+export type ParsedCommunityPluginManifestV015 = CommunityPluginManifestV015
+export type ParsedPluginManifest = PluginManifest
 
 export interface ComponentRelationships {
   readonly depends?: Readonly<Record<string, VersionRange>>
@@ -157,7 +179,7 @@ export class ManifestDefinitionCatalog {
   private readonly activations = new Map<string, ManifestObjectDefinition>()
   private readonly extensions = new Map<string, ManifestObjectDefinition>()
 
-  constructor(readonly validator = Object.freeze({ name: '@dsh-std/manifest', version: '0.1.0' })) {
+  constructor(readonly validator = Object.freeze({ name: '@dsh-std/manifest', version: PACKAGE_VERSION })) {
     nonEmpty(validator.name, 'validator.name')
     nonEmpty(validator.version, 'validator.version')
   }
@@ -241,17 +263,17 @@ export function parseManifest(source: string, options: ParseManifestOptions = {}
   try { value = JSON.parse(source) } catch (error) {
     throw new SyntaxError(`${options.source ?? 'dsh-plugin.json'}: ${errorMessage(error)}`, { cause: error })
   }
-  try { return defineManifest(value as PluginManifest) } catch (error) {
+  try { return defineManifest(value as PluginManifestInput) } catch (error) {
     throw new TypeError(`${options.source ?? 'dsh-plugin.json'}: ${errorMessage(error)}`, { cause: error })
   }
 }
 
-export function defineManifest<const T extends PluginManifest>(manifest: T): T {
+export function defineManifest<const T extends PluginManifestInput>(manifest: T): T & PluginManifest {
   validateManifest(manifest)
-  return deepFreeze(structuredClone(manifest))
+  return normalizeManifest(manifest) as T & PluginManifest
 }
 
-export function validateManifest(value: unknown): asserts value is PluginManifest {
+export function validateManifest(value: unknown): asserts value is PluginManifestInput {
   if (!record(value)) throw new TypeError('plugin manifest must be an object')
   if (value.manifestVersion === COMMUNITY_V015_MANIFEST_VERSION) {
     validateCommunityManifest(value)
@@ -316,7 +338,7 @@ export function validateComponentManifest(value: unknown): asserts value is Comp
 }
 
 /** Project a supported package manifest version into the common host composition model. */
-export function projectManifest(manifestValue: PluginManifest): ComponentManifest {
+export function projectManifest(manifestValue: PluginManifestInput): ComponentManifest {
   const manifest = defineManifest(manifestValue)
   return projectCommunityManifest(manifest)
 }
@@ -401,6 +423,23 @@ export function facetIdentity(manifest: ComponentManifest, facet: ComponentFacet
 
 export function facetKey(identity: FacetIdentity): string {
   return `${identity.component}@${identity.version}#${identity.facet}`
+}
+
+function normalizeManifest(manifest: PluginManifestInput): PluginManifest {
+  const cloned = structuredClone(manifest)
+  return deepFreeze({
+    ...cloned,
+    requires: {
+      contracts: cloned.requires?.contracts ?? [],
+      ...(cloned.requires?.services === undefined ? {} : { services: cloned.requires.services }),
+    },
+    contributes: {
+      ...(cloned.contributes ?? {}),
+      commands: cloned.contributes?.commands ?? [],
+    },
+    permissions: cloned.permissions ?? [],
+    subscriptions: cloned.subscriptions ?? [],
+  })
 }
 
 /** Match either the normalized extension name or its preserved Community contribution id. */
@@ -604,6 +643,7 @@ function validateActivation(value: unknown, label: string): void {
   const row = value as unknown as Record<string, unknown>
   exact(row, ['apiVersion', 'kind', 'spec'], label)
   if (!Object.hasOwn(row, 'spec')) throw new TypeError(`${label}.spec is required`)
+  validateProtocolJsonValue(row.spec, `${label}.spec`)
 }
 
 function validateProtocols(value: unknown, label: string): void {
@@ -623,6 +663,7 @@ function validateProtocolRows(value: unknown, requirement: boolean, label: strin
     const row = rowValue as unknown as Record<string, unknown>
     exact(row, requirement ? ['apiVersion', 'kind', 'optional', 'spec'] : ['apiVersion', 'kind', 'spec'], rowLabel)
     if (requirement && row.optional !== undefined && typeof row.optional !== 'boolean') throw new TypeError(`${rowLabel}.optional must be boolean`)
+    if (Object.hasOwn(row, 'spec')) validateProtocolJsonValue(row.spec, `${rowLabel}.spec`)
     const key = protocolKey(row as unknown as ApiReference)
     if (seen.has(key)) throw new TypeError(`${label} contains duplicate protocol ${JSON.stringify(key)}`)
     seen.add(key)
@@ -642,6 +683,7 @@ function validateExtensions(value: unknown, label: string): void {
     nonEmpty(extension.metadata.name, `${rowLabel}.metadata.name`)
     if (extension.metadata.labels !== undefined) validateLabels(extension.metadata.labels, `${rowLabel}.metadata.labels`)
     if (!Object.hasOwn(extension, 'spec')) throw new TypeError(`${rowLabel}.spec is required`)
+    validateProtocolJsonValue(extension.spec, `${rowLabel}.spec`)
     if (Object.hasOwn(extension, 'status')) throw new TypeError(`${rowLabel}.status is runtime-owned`)
     const key = `${protocolKey(extension as unknown as ApiReference)}\0${String(extension.metadata.name)}`
     if (seen.has(key)) throw new TypeError(`${label} contains duplicate extension ${JSON.stringify(key)}`)
@@ -660,6 +702,7 @@ function validatePermissions(value: unknown, label: string): void {
     localName(permission.action, `${rowLabel}.action`)
     if (permission.optional !== undefined && typeof permission.optional !== 'boolean') throw new TypeError(`${rowLabel}.optional must be boolean`)
     if (permission.reason !== undefined) nonEmpty(permission.reason, `${rowLabel}.reason`)
+    if (Object.hasOwn(permission, 'spec')) validateProtocolJsonValue(permission.spec, `${rowLabel}.spec`)
     const key = `${protocolKey(permission as unknown as ApiReference)}\0${String(permission.action)}`
     if (seen.has(key)) throw new TypeError(`${label} contains duplicate permission ${JSON.stringify(key)}`)
     seen.add(key)

@@ -15,28 +15,52 @@ interface FixtureSession {
     id: string
     createdAt: number
     parentSession?: string
+    isSeeded?: boolean
     seedLength?: number
     origin?: 'subagent'
   }
+  inheritedEventCount?: number
   events: FixtureEvent[]
 }
 
 class FixtureController implements DshSessionControllerFace {
   readonly sessions = new Map<string, FixtureSession>()
   readonly createCalls: string[] = []
+  readonly inspectCalls: string[] = []
   readonly renameCalls: Array<{ sessionId: string; title: string }> = []
   followFrames: Array<{ type: 'snapshot'; cursor: number } | { type: 'event'; event: FixtureEvent }> = []
 
-  async list(): Promise<{ items: Array<{ sessionId: string; origin?: 'subagent' }> }> {
+  async list(): Promise<{ items: Array<{
+    sessionId: string
+    updatedAt?: number
+    running?: boolean
+    blank?: boolean
+    parentSessionId?: string
+    origin?: 'subagent'
+    projections?: { asOfSeq: number; values: Readonly<Record<string, unknown>> }
+  }> }> {
     return {
       items: [...this.sessions.values()].map(session => ({
         sessionId: session.meta.id,
+        updatedAt: session.events.at(-1)?.time ?? session.meta.createdAt,
+        running: false,
+        blank: session.events.length === 0,
+        ...(session.meta.parentSession === undefined ? {} : { parentSessionId: session.meta.parentSession }),
         ...(session.meta.origin === undefined ? {} : { origin: session.meta.origin }),
+        ...(session.events.length === 0 ? {} : {
+          projections: {
+            asOfSeq: session.events.at(-1)!.seq,
+            values: {
+              title: ([...session.events].reverse().find((event: FixtureEvent) => event.type === 'session/title')?.data as { title?: unknown } | undefined)?.title ?? null,
+            },
+          },
+        }),
       })),
     }
   }
 
   async inspect(sessionId: string): Promise<FixtureSession> {
+    this.inspectCalls.push(sessionId)
     const session = this.sessions.get(sessionId)
     if (session === undefined) {
       throw Object.assign(new Error('not found'), { code: 'session/not-found' })
@@ -114,7 +138,8 @@ describe('DSH Session protocol adapter', () => {
       events: [{ type: 'session/title', seq: 0, time: 1_100, data: { title: 'Alpha' } }],
     })
     controller.sessions.set('session-b', {
-      meta: { id: 'session-b', createdAt: 2_000, parentSession: 'session-a', seedLength: 1 },
+      meta: { id: 'session-b', createdAt: 2_000, parentSession: 'session-a', isSeeded: true },
+      inheritedEventCount: 1,
       events: [{ type: 'user/message', seq: 0, time: 2_100, data: { content: [] } }],
     })
     controller.sessions.set('child', {
@@ -138,8 +163,22 @@ describe('DSH Session protocol adapter', () => {
     expect(second.catalogRevision).toBe(first.catalogRevision)
     expect(second.sessions).toEqual([expect.objectContaining({
       session: { provider: 'dsh/runtime', id: 'session-b' },
-      lineage: { parent: { provider: 'dsh/runtime', id: 'session-a' }, through: '0' },
+      lineage: { parent: { provider: 'dsh/runtime', id: 'session-a' } },
     })])
+    expect(controller.inspectCalls).toEqual([])
+  })
+
+  it('keeps the previous DSH Session summary shape working through inspect fallback', async () => {
+    const { controller, catalog } = fixture()
+    controller.sessions.set('session-a', {
+      meta: { id: 'session-a', createdAt: 1_000 },
+      events: [{ type: 'session/title', seq: 0, time: 1_100, data: { title: 'Legacy' } }],
+    })
+    vi.spyOn(controller, 'list').mockResolvedValueOnce({ items: [{ sessionId: 'session-a' }] })
+    await expect(catalog.handle('list', {}, context())).resolves.toMatchObject({
+      sessions: [{ session: { id: 'session-a' }, title: 'Legacy' }],
+    })
+    expect(controller.inspectCalls).toEqual(['session-a'])
   })
 
   it('maps create request ids idempotently and avoids duplicate title events', async () => {
@@ -194,19 +233,28 @@ describe('DSH Session protocol adapter', () => {
     expect(controller.renameCalls).toHaveLength(1)
   })
 
-  it.each([
-    { connectionId: 'connection-2' },
-    { instanceId: 'other-client-instance' },
-    { participantId: 'other/plugin' },
-  ])('preserves the existing request-to-session mapping across caller changes (%j)', async client => {
+  it('preserves the existing request-to-session mapping across connections for one client scope', async () => {
     const { controller, catalog } = fixture()
     const input = { requestId: 'request-1', title: 'Original' }
     const first = await catalog.handle('create', input, context()) as CreateSessionResult
     await controller.rename({ sessionId: first.session.session.id, title: 'User edited' })
-    const second = await catalog.handle('create', input, context([], undefined, client)) as CreateSessionResult
+    const second = await catalog.handle('create', input, context([], undefined, { connectionId: 'connection-2' })) as CreateSessionResult
     expect(second).toEqual(first)
     expect(controller.createCalls).toHaveLength(1)
     expect(controller.renameCalls.map(call => call.title)).toEqual(['Original', 'User edited'])
+  })
+
+  it.each([
+    { instanceId: 'other-client-instance' },
+    { participantId: 'other/plugin' },
+  ])('isolates equal request ids from a different client scope (%j)', async client => {
+    const { controller, catalog } = fixture()
+    const input = { requestId: 'request-1', title: 'Original' }
+    const first = await catalog.handle('create', input, context()) as CreateSessionResult
+    const second = await catalog.handle('create', input, context([], undefined, client)) as CreateSessionResult
+    expect(second.session.session.id).not.toBe(first.session.session.id)
+    expect(controller.createCalls).toHaveLength(2)
+    expect(controller.renameCalls).toHaveLength(2)
   })
 
   it('retains the create receipt across plan revisions within the same client scope', async () => {
@@ -303,6 +351,22 @@ describe('DSH Session protocol adapter', () => {
     })
     expect(controller.createCalls).toHaveLength(1)
     expect(controller.renameCalls).toHaveLength(before)
+  })
+
+  it('reads the exact inherited prefix from the 0.1.5 inspection shape', async () => {
+    const { controller, catalog } = fixture()
+    controller.sessions.set('forked', {
+      meta: { id: 'forked', createdAt: 2_000, parentSession: 'parent', isSeeded: true },
+      inheritedEventCount: 2,
+      events: [
+        { type: 'user/message', seq: 0, time: 1_000, data: {} },
+        { type: 'turn/end', seq: 1, time: 1_100, data: {} },
+        { type: 'session/end-seed', seq: 2, time: 2_000, data: {} },
+      ],
+    })
+    await expect(catalog.handle('get', { provider: 'dsh/runtime', id: 'forked' }, context())).resolves.toMatchObject({
+      lineage: { parent: { provider: 'dsh/runtime', id: 'parent' }, through: '1' },
+    })
   })
 
   it('translates durable event cursors, direction and replay classification', async () => {

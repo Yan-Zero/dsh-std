@@ -100,11 +100,11 @@ Activation context 提供统一的 cleanup 注册：
 ```ts
 interface CleanupScope {
   readonly signal: AbortSignal
-  add(dispose: () => void | Promise<void>): void
+  add(dispose: () => void | Promise<void>): () => Promise<void>
 }
 ```
 
-Scope 关闭时先触发 abort signal，再按注册的逆序执行 disposer。每个 disposer 至多调用一次；某项清理失败不能阻止其余 disposer 运行。
+Scope 关闭时先触发 abort signal，再按注册的逆序执行 disposer。`add` 返回的 disposer 可以由 owner 提前调用；提前调用、重复调用和 Scope 关闭必须共享同一次清理及其 settlement。Scope 关闭时必须等待已经开始但尚未完成的 disposer，不能因为它已被调用过就把仍在进行的资源释放当作完成。每个 disposer 的主体至多执行一次；某项清理失败不能阻止其余 disposer 运行。
 
 SDK 提供的 service、event、protocol support、timer 与 background task API 都必须自动登记 disposer。实现代码自行创建、无法由 SDK 观察的资源由 `deactivate` 负责。
 

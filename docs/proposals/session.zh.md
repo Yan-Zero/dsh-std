@@ -162,7 +162,7 @@ interface SessionCatalogPage {
 }
 ```
 
-List 返回当前 client scope 可见的 Session。默认顺序为 `createdAt` 逆序；时间相同或缺失时按规范化 SessionReference 排序。Provider 可以支持额外 order，但不能把进程内 map 顺序当作稳定结果。
+List 返回当前 client scope 可见的 Session。默认顺序为 `createdAt` 逆序；时间相同或缺失时按规范化 SessionReference 排序。Provider 可以支持额外 order，但不能把进程内 map 顺序当作稳定结果。List 与 Get 必须（MUST）能够读取未附着 Agent 的持久 Session，并且不得为了生成 descriptor 隐式创建、恢复或启动 Agent。Provider 可以使用经过验证的 header 或 projection cache 避免读取完整历史；该优化不能把缺失 projection 误报为 Session 不存在。
 
 Page cursor 不透明，并绑定 provider、client scope、order 和 catalog revision。Client 不能修改、拼接或跨 agreement 复用 cursor。
 
@@ -330,7 +330,7 @@ Provider 返回的 events 数量不得超过请求的 `limit` 或 agreement 的 
 
 Cursor 不存在、属于其他 Session 或已因 provider 明确的 retention policy 失效时返回 cursor-invalid，不得静默从开头继续。
 
-Read 是持久历史 snapshot，不包含尚未由 Session provider提交的 Agent stream delta。
+Read 是持久历史 snapshot，不包含尚未由 Session provider提交的 Agent stream delta。Read 与 Follow 的 opening snapshot 不得为了读取 cold Session 隐式恢复 Agent；活动执行和 transient output 由 AgentControl 观察面拥有。
 
 ### Follow
 

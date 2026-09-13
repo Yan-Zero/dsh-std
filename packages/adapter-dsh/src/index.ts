@@ -153,6 +153,7 @@ import {
   localModuleExtensionDefinition as browserLocalModuleExtensionDefinition,
   registerManifest as registerBrowserUiManifest,
 } from '@dsh-std/ui-browser'
+import { ADAPTER_VERSION } from './version.js'
 import {
   writeWorkspaceBytes,
   type WorkspaceFileSystem,
@@ -690,6 +691,9 @@ class DshSessionEventRegistry {
 
 function toStandardBlock(block: ContentBlock): ModelContentBlock {
   if (block.type === 'image') return { type: 'image', reference: block.attachment }
+  // DSH 0.1.5 projects durable file references to deterministic text before
+  // calling a model adapter. Seeing one here means that Host contract drifted.
+  if (block.type === 'file') throw new TypeError('DSH file block reached the model adapter before request projection')
   if (block.type === 'tool-result') return {
     type: 'tool-result', toolCallId: String(block.toolCallId),
     content: block.content.map(toStandardBlock),
@@ -987,7 +991,7 @@ export class DshStandardAdapter extends TypertRemoteService {
     this.connectionEndpoint.register({ declaration, implementations })
     this.publications.publish({
       identity: Object.freeze({
-        component: ADAPTER_COMPONENT, version: '0.1.0', facet: 'runtime',
+        component: ADAPTER_COMPONENT, version: ADAPTER_VERSION, facet: 'runtime',
         instanceId: `${instanceId}:runtime`, participantId: ADAPTER_PARTICIPANT,
       }),
       declaration,
@@ -1138,7 +1142,7 @@ export class DshStandardAdapter extends TypertRemoteService {
       unpublish = this.publications.publish({
         identity: Object.freeze({
           component: ADAPTER_COMPONENT,
-          version: '0.1.0',
+          version: ADAPTER_VERSION,
           facet: 'ui-surface-host',
           instanceId,
           participantId: provider.participantId,
@@ -1677,7 +1681,7 @@ export class DshStandardAdapter extends TypertRemoteService {
 }
 
 export function createDshProtocolCatalog(): ProtocolCatalog {
-  const catalog = new ProtocolCatalog({ name: '@dsh-std/adapter-dsh', version: '0.1.0' })
+  const catalog = new ProtocolCatalog({ name: '@dsh-std/adapter-dsh', version: ADAPTER_VERSION })
   registerCommand(catalog)
   registerMessages(catalog)
   registerModel(catalog)

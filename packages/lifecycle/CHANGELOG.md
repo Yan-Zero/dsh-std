@@ -2,6 +2,10 @@
 
 Changes to `@dsh-std/lifecycle` are recorded here.
 
+## 0.1.1-rc.3
+
+- Made cleanup disposers awaitable and settlement-stable: manual disposal and scope shutdown now share one in-flight cleanup instead of allowing teardown to finish around unfinished work.
+
 ## 0.1.1-rc.2
 
 - Resolve extension publications by either normalized `metadata.name` or a preserved Community contribution id, rejecting ambiguous aliases.

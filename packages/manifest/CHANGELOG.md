@@ -2,6 +2,12 @@
 
 Changes to `@dsh-std/manifest` are recorded here.
 
+## 0.1.1-rc.3
+
+- Require activation, protocol, extension, and permission specs in the internal Component projection to remain lossless JSON data before definitions or executable code can observe them.
+- Normalize omitted Community v0.15 `requires`, `permissions`, `contributes`, and `subscriptions` containers while preserving the original required-container `PluginManifest` result type; the separate input type continues accepting concise manifests.
+- Report the actual package version in default manifest validation provenance.
+
 ## 0.1.1-rc.2
 
 - Preserved a Community contribution's fully-qualified `id` as its activation publication alias while retaining the protocol-valid normalized extension name.

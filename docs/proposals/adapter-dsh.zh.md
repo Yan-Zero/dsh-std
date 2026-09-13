@@ -171,11 +171,15 @@ Model adapter 将 `ModelProviderHandler` 映射到 DSH 的 LLM registry。它把
 
 ### Session mapping
 
-Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。Catalog list/get 只返回当前 scope 可见的 descriptor；History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset。
+Session adapter 将 DSH 的 live Session registry 与 SessionPersistence 投影为同一 `sessionDomain`。面向 DeepSeek Harness `0.1.5-rc.2` 时，Catalog list 使用 Session Controller 的 body-free summaries 与已验证 projections，不为每个列表项读取完整 event log；Get/History 才按明确 SessionReference inspect。History read/follow 从权威 Session event 序列产生 opaque cursor，不向 client 公开日志目录或文件 offset，也不请求只供产品 Web 呈现的 cursorless assistant stream。
+
+为保持上一适配线兼容，缺少 `updatedAt` 等新版 summary 字段的 DSH `0.1.2` Controller 继续使用逐项 inspect；Adapter 不得把旧 summary 当作 malformed 0.1.5 数据，也不得在 0.1.5 已提供完整 body-free summary 时退化为全历史读取。
 
 DSH 提供的 create、rename、delete 或 fork 操作只有在其公开领域 API 可以保持对应原子性与 lifecycle 语义时才进入 support spec。缺少某项产品操作不会阻止 adapter 发布只读 Catalog/History；adapter 不能绕过 Session invariant 伪造该 operation。
 
-SessionCatalog create 的重试必须遵守 Session 协议的请求幂等规则。已完成请求的重试不得重新执行标题初始化，也不得覆盖后续显式改名。原生操作提交后发生响应失败时，adapter 应检查已提交状态，避免恢复过程重复修改已有标题。
+SessionCatalog create 的重试必须遵守 Session 协议的请求幂等规则。Receipt 与确定性 Session id 必须至少按 consumer endpoint instance、participant identity 与 requestId 隔离；connection id 与 plan revision 变化不改变同一 client scope，另一个 endpoint instance 或 participant 使用相同 requestId 不得命中该 receipt。已完成请求的重试不得重新执行标题初始化，也不得覆盖后续显式改名。原生操作提交后发生响应失败时，adapter 应检查已提交状态，避免恢复过程重复修改已有标题。
+
+DSH `0.1.5` 的 fork lineage cut 来自 inspection 顶层 `inheritedEventCount`，不是旧 header 的 `seedLength`。Adapter 在 Get/History 路径使用该值产生标准 `lineage.through`；body-free Catalog list 可以只报告 parent 而省略无法从 summary 证明的 through cursor。
 
 > **注解（草案口径）**：跨重启持久化请求记录（重放原始结果、检测原始输入冲突）与请求记录的内存有界性，仍属草案口径，尚未定为协议契约。当前实现仅在 adapter 实例生命周期内保证 `requestId` 幂等；待出现真实消费需求后，再以专门、带证据的 proposal 约束。
 
